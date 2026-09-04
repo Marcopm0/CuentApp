@@ -1,43 +1,77 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# ==========================================
+# Dependencias y Bundlers (PESADOS)
+# ==========================================
 node_modules/
+.pnpm-store/
+package-lock.json.bak
+yarn.lock.bak
 
-# Expo
+# ==========================================
+# Expo & Metro Cache
+# ==========================================
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+.metro-health-check*
+*.metro-cache*
 
-# Native
+# ==========================================
+# Builds y Carpetas Nativas Generadas
+# ==========================================
+/ios/
+/android/
+*.apk
+*.aab
+*.ipa
 .kotlin/
+
+# Certificados y firmas nativas
 *.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.keystore
 
-# Metro
-.metro-health-check*
+# ==========================================
+# Variables de Entorno y Secretos
+# ==========================================
+.env
+.env.*
+!.env.example
 
-# debug
+# Credenciales nativas de Firebase / Cloud
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+
+# ==========================================
+# TypeScript, Tests y Debug
+# ==========================================
+*.tsbuildinfo
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+coverage/
+.nyc_output/
 
-# macOS
+# ==========================================
+# Basura del Sistema y Editores (Evita duplicados)
+# ==========================================
 .DS_Store
+Thumbs.db
 *.pem
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
 
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
-
-app-example
-
-# generated native folders
-/ios
-/android
+# Carpetas de ejemplo de Expo
+app-example/

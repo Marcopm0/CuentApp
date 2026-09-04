@@ -1,98 +1,108 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import React from 'react';
+import { SafeAreaView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 export default function HomeScreen() {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={styles.safeArea}>
+      <ThemedView style={styles.container}>
+        <ThemedText type='title'>Inicio</ThemedText>
+        <View style={styles.headerRow}>
+          <ThemedText style={styles.saludo}>Hola de nuevo XXXX</ThemedText>
+          <TouchableOpacity style={styles.miniwigdet} activeOpacity={0.7}>
+            <ThemedText style={styles.miniwigdettext}>23/08/2026</ThemedText>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.widget}>
+          <ThemedText style={styles.widgetlabel}>Cuenta de ahorro personal</ThemedText>
+          <ThemedText style={styles.widgetAmount}>$50000</ThemedText>
+        </View>
+
+        <View style={styles.widget}>
+          <ThemedText style={styles.widgetlabel}>Semaforo de gastos</ThemedText>
+          <ThemedText style={styles.widgetAmount}>Barra de semaforo aqui va</ThemedText>
+        </View>
+
+
+
+        <View style={styles.widget}>
+          <ThemedText style={styles.widgetlabel}>Gastos</ThemedText>
+          <ThemedText style={styles.widgetAmount}>XXXXXXXXXXX</ThemedText>
+        </View>
+
+
+
+
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  safeArea: {
+    flex: 1,
+  },
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: 25,
+    gap: 16,
+    backgroundColor: '#0B0F17',
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    width: '90%',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  saludo: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#94A3B8',
+    alignSelf: 'flex-start',
+    marginLeft: '7%',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  miniwigdet: {
+    backgroundColor: '#161F30',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#24324D',
   },
+  miniwigdettext: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#94A3B8',
+    alignSelf: 'flex-start',
+  },
+  widget: {
+    width: '90%',
+    backgroundColor: '#161F30',
+    borderRadius: 16,
+    padding: 20,
+    gap: 6,
+
+
+    //borde
+    borderWidth: 1,
+    borderColor: '#24324D',
+  },
+  widgetlabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#94A3B8',
+    alignSelf: 'flex-start',
+    marginLeft: '5%',
+  },
+  widgetAmount: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#ffffffff',
+    alignSelf: 'flex-start',
+    marginLeft: '10%',
+  }
 });
