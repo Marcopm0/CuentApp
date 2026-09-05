@@ -1,8 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+
+
+import { sendEmailVerification, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 export default function WelcomeAuthScreen() {
     const router = useRouter();
@@ -10,6 +15,80 @@ export default function WelcomeAuthScreen() {
     const [password, setPassword] = useState('');
 
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+
+    //Funcion principal del login
+    const handleLogin = async () => {
+        if (!email.trim() || !password) {
+            Alert.alert('Campos incompletos', 'Ingresa tu correo y contraseña');
+            return;
+        }
+        setIsLoading(true);
+
+        try {
+            //Autenticacion con fire base
+            const userCredential = await signInWithEmailAndPassword(
+                auth,
+                email.trim(),
+                password
+            );
+            const user = userCredential.user;
+
+            if (!user.emailVerified) {
+                await signOut(auth);
+                Alert.alert('Correo no verificado', 'Por favor verifica tu correo electronico para iniciar sesion',
+                    [
+                        {
+                            text: 'Renviar correo',
+                            onPress: async () => {
+                                try {
+                                    const tempCred = await signInWithEmailAndPassword(
+                                        auth,
+                                        email.trim(),
+                                        password
+                                    );
+                                    await sendEmailVerification(tempCred.user);
+                                    await signOut(auth);
+                                    Alert.alert('Correo reenviado', 'Por favor verifica tu correo electronico para iniciar sesion');
+                                } catch {
+                                    Alert.alert('Error', 'No se pudo enviar el correo intentelo mas tarde');
+                                }
+                            },
+                        }, {
+                            text: 'Entendido',
+                            style: 'cancel',
+                        },
+                    ]
+                );
+                return;
+            }
+            //si es que si esta verificado camos al dashboard
+            router.replace('/(tabs)' as any);
+        } catch (error: any) {
+            let errorMessage = 'No se pudo iniciar sesion. Verifique sus datos.';
+
+            //Mapeo de errores de firebase
+            if (
+                error.code === 'auth/invalid-credential' ||
+                error.code === 'auth/user-not-found' ||
+                error.code === 'auth/wrong-password'
+            ) {
+                errorMessage = 'Correo o contraseña incorrectos';
+            } else if (error.code === 'auth/invalid-email') {
+                errorMessage = 'El formato del correo es invalido';
+            } else if (error.code === 'auth/too-many-requests') {
+                errorMessage = 'Demasidos intentos fallidos. Intentelo más tarde.';
+            } else if (error.code === 'auth/network-request-failed') {
+                errorMessage = 'Sin conexion a internet. Revisa tu red.';
+            }
+
+            Alert.alert('Error de acceso', errorMessage);
+
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
 
 
     return (
@@ -25,7 +104,7 @@ export default function WelcomeAuthScreen() {
                     showsVerticalScrollIndicator={false}>
 
 
-                    {/* Encabezado / Logo */}
+                    {/* Encabezado */}
                     <View style={styles.header}>
                         <Text style={styles.appTitle}>Iniciar sesion</Text>
                     </View>
@@ -64,26 +143,32 @@ export default function WelcomeAuthScreen() {
                                         size={20}
                                         color="#94A3B8"
                                     />
-
                                 </TouchableOpacity>
                             </View>
                         </View>
 
                         <View style={styles.buttonContainer}>
                             <TouchableOpacity
-                                style={styles.primaryButton}
+                                style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
                                 activeOpacity={0.8}
-                                onPress={() => console.log("Este va mandar a el dashboard")}
+                                onPress={handleLogin}
+                                disabled={isLoading}
                             >
-                                <Text style={styles.primaryButtonText}>Continuar</Text>
+                                {isLoading ? (
+                                    <ActivityIndicator color="#0B0F17" />
+                                ) : (
+                                    <Text style={styles.primaryButtonText}>Continuar</Text>
+                                )}
 
                             </TouchableOpacity>
                             <TouchableOpacity
                                 activeOpacity={0.8}
-                                onPress={() => console.log("Este va mandar a el recover-password")}
+                                onPress={() => router.push('/(auth)/forgot-password' as any)}
+                                disabled={isLoading}
                             >
                                 <Text style={styles.taglineolvido}>¿Olvido su contraseña?</Text>
                             </TouchableOpacity>
+
                         </View>
                     </View>
                 </ScrollView>
@@ -141,6 +226,9 @@ const styles = StyleSheet.create({
         paddingVertical: 16,
         borderRadius: 14,
         alignItems: 'center',
+    },
+    buttonDisabled: {
+        opacity: 0.6,
     },
     primaryButtonText: {
         color: '#0B0F17',

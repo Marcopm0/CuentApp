@@ -37,7 +37,14 @@ export default function WelcomeAuthScreen() {
                 </View>
 
             </View>
-            <Text style={styles.Aviso}>Al continuar aceptas nuestros Términos de uso y Aviso de privacidad</Text>
+            <TouchableOpacity
+                style={styles.termsButton}
+                activeOpacity={0.7}
+                hitSlop={{ top: 12, bottom: 16, left: 20, right: 20 }}
+                onPress={() => router.push('/(auth)/terms')}>
+                <Text style={styles.avisoText}>
+                    Al continuar aceptas nuestros Términos de uso y Aviso de privacidad</Text>
+            </TouchableOpacity>
         </SafeAreaView>
     );
 }
@@ -70,14 +77,12 @@ const styles = StyleSheet.create({
         lineHeight: 22,
         paddingHorizontal: 16,
     },
-    Aviso: {
-
-        bottom: 48,
+    avisoText: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: '#64748B',
         textAlign: 'center',
         lineHeight: 18,
-        paddingHorizontal: 32,
+        textDecorationLine: 'underline',
     },
     buttonContainer: {
         flex: 1,
@@ -108,5 +113,11 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '600',
+    },
+    termsButton: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        marginBottom: 20,
+
     },
 });
