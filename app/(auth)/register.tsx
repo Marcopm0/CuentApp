@@ -1,17 +1,94 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export default function WelcomeAuthScreen() {
+//Servicio de FireBase
+import { createUserWithEmailAndPassword, sendEmailVerification, signOut } from 'firebase/auth';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { auth, db } from '../../services/firebase';
+
+export default function RegisterScreen() {
     const router = useRouter();
+    //estado del formulario
+    const [displayName, setDisplayName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
 
+
+    //Estado de visibilidad del password
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+
+    //Funcion de registro
+    const handleRegister = async () => {
+        //validaciones previas locales
+        if (!displayName.trim() || !email.trim() || !password || !confirmPassword) {
+            Alert.alert('Campos incompletos', 'Por favor completa todos los campos');
+            return;
+        }
+        if (password !== confirmPassword) {
+            Alert.alert('Error', 'Las contraseñas no coinciden');
+            return;
+        }
+        if (password.length < 6) {
+            Alert.alert('Contraseña debil', 'La contraseña debe tener al menos 6 caracteres');
+            return;
+        }
+        setIsLoading(true);
+
+        try {
+            //Crear usuario en FIREBASE
+            const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+            const user = userCredential.user;
+
+            //crear documento de perfil en firebase(coleccion "users")
+            await setDoc(doc(db, 'users', user.uid), {
+                uid: user.uid,
+                email: user.email,
+                displayName: displayName.trim(),
+                currency: 'MXN',
+                createdAt: serverTimestamp(),
+            });
+
+            await sendEmailVerification(user);
+
+            await signOut(auth);
+
+            Alert.alert(
+                'Cuenta creada',
+                'Tu cuenta se ha creado exitosamente. Por favor verifica tu correo electrónico para continuar'
+                , [
+                    {
+                        text: 'Ir a Iniciar sesion',
+                        onPress: () => router.replace('/(auth)/login'),
+                    },
+                ]
+            );
+        } catch (error: any) {
+            // Imprime todo el detalle en la terminal de Expo donde corre tu app:
+            console.error("DEBUG REGISTRO ERROR COMPLETO:", error);
+            console.log("CÓDIGO DE ERROR:", error.code);
+            console.log("MENSAJE DE ERROR:", error.message);
+
+            // Muestra el código real en pantalla para identificarlo al instante:
+            let errorMessage = `Error (${error.code || 'sin código'}): ${error.message}`;
+
+            if (error.code === 'auth/email-already-in-use') {
+                errorMessage = 'Este correo electronico ya esta registrado.';
+            } else if (error.code === 'auth/invalid-email') {
+                errorMessage = 'El correo electronico no es valido.';
+            } else if (error.code === 'auth/network-request-failed') {
+                errorMessage = 'Error de conexion. Verifica tu conexion a interne.';
+            }
+            Alert.alert('Error de registro', errorMessage);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -31,8 +108,20 @@ export default function WelcomeAuthScreen() {
                             <Text style={styles.tagline}>una cuenta!!</Text>
                         </View>
 
-                        {/* Acciones centradas y separadas */}
+
                         <View style={styles.buttonContainer}>
+                            {/* Nombre completo */}
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.Label}>Nombre completo</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Tu nombre o alias"
+                                    placeholderTextColor="#64748B"
+                                    value={displayName}
+                                    onChangeText={setDisplayName}
+                                    autoCapitalize="words"
+                                />
+                            </View>
 
                             <View style={styles.inputGroup}>
                                 <Text style={styles.Label}>Correo electronico</Text>
@@ -100,23 +189,29 @@ export default function WelcomeAuthScreen() {
                                 </View>
                             </View>
                             <TouchableOpacity
-                                style={styles.primaryButton}
+                                style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
                                 activeOpacity={0.8}
-                                onPress={() => { console.log("Aun nada"); }}
+                                onPress={handleRegister}
+                                disabled={isLoading}
                             >
-                                <Text style={styles.primaryButtonText}>Registrarme</Text>
+                                {isLoading ? (
+                                    <ActivityIndicator color="#0B0F17" />
+                                ) : (
+                                    <Text style={styles.primaryButtonText}>Registrarme</Text>
+                                )}
                             </TouchableOpacity>
 
-
+                            {/*Enlace a login*/}
                             <TouchableOpacity
                                 activeOpacity={0.8}
                                 onPress={() => router.push('/(auth)/login')}
+                                disabled={isLoading}
                             >
-                                <Text style={styles.footerButtonText}>¿YA TIENES UNA CUENTA? INICIAR SESION</Text>
+                                <Text style={styles.footerButtonText}>
+                                    ¿YA TIENES UNA CUENTA? INICIAR SESION
+                                </Text>
                             </TouchableOpacity>
                         </View>
-
-
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -192,6 +287,9 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         alignItems: 'center',
         marginTop: 6,
+    },
+    buttonDisabled: {
+        opacity: 0.6,
     },
     primaryButtonText: {
         color: '#0B0F17',
