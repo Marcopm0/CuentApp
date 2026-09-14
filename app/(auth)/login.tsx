@@ -5,9 +5,9 @@ import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, S
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 
-
 import { sendEmailVerification, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { auth } from '../../services/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../services/firebase';
 
 export default function WelcomeAuthScreen() {
     const router = useRouter();
@@ -33,7 +33,7 @@ export default function WelcomeAuthScreen() {
                 password
             );
             const user = userCredential.user;
-
+            //validar correo 
             if (!user.emailVerified) {
                 await signOut(auth);
                 Alert.alert('Correo no verificado', 'Por favor verifica tu correo electronico para iniciar sesion',
@@ -62,8 +62,16 @@ export default function WelcomeAuthScreen() {
                 );
                 return;
             }
-            //si es que si esta verificado camos al dashboard
-            router.replace('/(tabs)' as any);
+            const userDocRef = doc(db, 'users', user.uid);
+            const userDocSnap = await getDoc(userDocRef);
+            const hasCompletedOnboarding =
+                userDocSnap.exists() && userDocSnap.data()?.hasCompletedOnboarding === true;
+            //vamos a decidir a donde va el usuario
+            if (hasCompletedOnboarding) {
+                router.replace('/(tabs)');
+            } else {
+                router.replace('/(auth)/setup');
+            }
         } catch (error: any) {
             let errorMessage = 'No se pudo iniciar sesion. Verifique sus datos.';
 
@@ -168,6 +176,13 @@ export default function WelcomeAuthScreen() {
                             >
                                 <Text style={styles.taglineolvido}>¿Olvido su contraseña?</Text>
                             </TouchableOpacity>
+                            {/* <TouchableOpacity
+                                activeOpacity={0.8}
+                                onPress={() => router.push('/(auth)/setup' as any)}
+                                disabled={isLoading}
+                            >
+                                <Text style={styles.taglineolvido}>momentaneo para ver setup</Text>
+                            </TouchableOpacity>*/}
 
                         </View>
                     </View>

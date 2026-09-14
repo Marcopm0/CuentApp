@@ -1,13 +1,10 @@
+import { getAuthErrorMessage, registerUser } from '@/services/authService';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-//Servicio de FireBase
-import { createUserWithEmailAndPassword, sendEmailVerification, signOut } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { auth, db } from '../../services/firebase';
 
 export default function RegisterScreen() {
     const router = useRouter();
@@ -16,6 +13,7 @@ export default function RegisterScreen() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+
 
 
     //Estado de visibilidad del password
@@ -41,54 +39,33 @@ export default function RegisterScreen() {
         setIsLoading(true);
 
         try {
-            //Crear usuario en FIREBASE
-            const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-            const user = userCredential.user;
-
-            //crear documento de perfil en firebase(coleccion "users")
-            await setDoc(doc(db, 'users', user.uid), {
-                uid: user.uid,
-                email: user.email,
+            // 2. Llamada única al servicio desacoplado
+            await registerUser({
                 displayName: displayName.trim(),
-                currency: 'MXN',
-                createdAt: serverTimestamp(),
+                email: email.trim(),
+                password,
             });
-
-            await sendEmailVerification(user);
-
-            await signOut(auth);
 
             Alert.alert(
                 'Cuenta creada',
-                'Tu cuenta se ha creado exitosamente. Por favor verifica tu correo electrónico para continuar'
-                , [
+                'Tu cuenta se ha creado exitosamente. Por favor verifica tu correo electrónico para continuar.',
+                [
                     {
-                        text: 'Ir a Iniciar sesion',
+                        text: 'Ir a Iniciar sesión',
                         onPress: () => router.replace('/(auth)/login'),
                     },
                 ]
             );
-        } catch (error: any) {
-            // Imprime todo el detalle en la terminal de Expo donde corre tu app:
-            console.error("DEBUG REGISTRO ERROR COMPLETO:", error);
-            console.log("CÓDIGO DE ERROR:", error.code);
-            console.log("MENSAJE DE ERROR:", error.message);
-
-            // Muestra el código real en pantalla para identificarlo al instante:
-            let errorMessage = `Error (${error.code || 'sin código'}): ${error.message}`;
-
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = 'Este correo electronico ya esta registrado.';
-            } else if (error.code === 'auth/invalid-email') {
-                errorMessage = 'El correo electronico no es valido.';
-            } else if (error.code === 'auth/network-request-failed') {
-                errorMessage = 'Error de conexion. Verifica tu conexion a interne.';
-            }
+        } catch (error: unknown) {
+            const errorMessage = getAuthErrorMessage(error);
             Alert.alert('Error de registro', errorMessage);
         } finally {
             setIsLoading(false);
         }
     };
+
+
+
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -101,7 +78,7 @@ export default function RegisterScreen() {
                     <View style={styles.cardContainer}>
 
 
-                        {/* Encabezado / Logo */}
+                        {/* Encabezado */}
                         <View style={styles.header}>
                             <Text style={styles.appTitle}>Bienvenido</Text>
                             <Text style={styles.tagline}>Vamos a Crear</Text>
