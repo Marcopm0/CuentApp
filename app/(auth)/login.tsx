@@ -176,13 +176,13 @@ export default function WelcomeAuthScreen() {
                             >
                                 <Text style={styles.taglineolvido}>¿Olvido su contraseña?</Text>
                             </TouchableOpacity>
-                            {/* <TouchableOpacity
+                            <TouchableOpacity
                                 activeOpacity={0.8}
                                 onPress={() => router.push('/(auth)/setup' as any)}
                                 disabled={isLoading}
                             >
                                 <Text style={styles.taglineolvido}>momentaneo para ver setup</Text>
-                            </TouchableOpacity>*/}
+                            </TouchableOpacity>
 
                         </View>
                     </View>

@@ -48,6 +48,7 @@ export default function SetupScreen() {
     const [savings, setSavings] = useState<string>('');
     const [leisure, setLeisure] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
+    const numericIncome = parseFloat(income) || 0;
 
     // Totales calculados en memoria
     const totalFixed = useMemo(() => {
@@ -58,8 +59,11 @@ export default function SetupScreen() {
         }, 0);
     }, [expenses]);
 
-    const numericIncome = parseFloat(income) || 0;
-    const remainingFreeMoney = Math.max(0, numericIncome - totalFixed);
+    const remainingAfterFixed = Math.max(0, numericIncome - totalFixed);
+    const numericSaving = parseFloat(savings) || 0;
+    const numericLeisure = parseFloat(leisure) || 0;
+    const totalAllocatedPaso3 = numericSaving + numericLeisure;
+    const unallocatedBuffer = remainingAfterFixed - totalAllocatedPaso3;
 
     // Selección/deselección de un gasto fijo
     const toggleExpense = (id: string) => {
@@ -123,13 +127,10 @@ export default function SetupScreen() {
     };
 
     const handleFinish = async () => {
-        const savingsVal = parseFloat(savings) || 0;
-        const leisureVal = parseFloat(leisure) || 0;
-
-        if (savingsVal + leisureVal > remainingFreeMoney) {
+        if (unallocatedBuffer < 0) {
             Alert.alert(
                 'Distribución excedida',
-                `La suma de ahorro ($${savingsVal}) y ocio ($${leisureVal}) excede tu dinero libre disponible ($${remainingFreeMoney.toFixed(2)}).`
+                `La suma de ahorro y ocio ($${totalAllocatedPaso3.toFixed(2)}) supera los $${remainingAfterFixed.toFixed(2)} que tenías disponibles tras tus gastos fijos.`
             );
             return;
         }
@@ -147,8 +148,8 @@ export default function SetupScreen() {
             await completeOnboarding({
                 monthlyIncome: numericIncome,
                 fixedExpenses: activeExpenses,
-                savingsTarget: savingsVal,
-                leisureBudget: leisureVal,
+                savingsTarget: numericSaving,
+                leisureBudget: numericLeisure,
             });
 
             router.replace('/(tabs)');
@@ -164,11 +165,13 @@ export default function SetupScreen() {
         <SafeAreaView style={styles.safeArea}>
             <KeyboardAvoidingView
                 style={styles.keyboardView}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 <ScrollView
                     contentContainerStyle={styles.scrollContainer}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                    showsVerticalScrollIndicator={false}
                 >
                     <View style={styles.cardContainer}>
                         {/* Indicador de pasos */}
@@ -192,7 +195,7 @@ export default function SetupScreen() {
                                 </View>
                                 <Text style={styles.title}>¿Cuál es tu ingreso mensual?</Text>
                                 <Text style={styles.subtitle}>
-                                    La base para calcular cuánto dinero libre te queda después de tus compromisos.
+                                    Con esto partiremos para crear tu control de gastos.
                                 </Text>
 
                                 <View style={styles.amountInputContainer}>
@@ -219,8 +222,7 @@ export default function SetupScreen() {
                                 </View>
                                 <Text style={styles.title}>Tus Gastos Fijos</Text>
                                 <Text style={styles.subtitle}>
-                                    Selecciona los que pagas cada mes e indica cuánto cuesta cada uno para vigilar si suben. Si no encuentras
-                                    algun apartado lo podras crear despues.
+                                    Selecciona los que pagas cada mes e indica cuánto cuesta cada uno para vigilar si suben. Si no encuentras algún apartado lo podrás crear después.
                                 </Text>
 
                                 <View style={styles.expensesList}>
@@ -278,7 +280,7 @@ export default function SetupScreen() {
 
                                 <View style={styles.summaryBar}>
                                     <Text style={styles.summaryText}>
-                                        Total en Fijos: <Text style={styles.summaryHighlight}>${totalFixed.toFixed(2)}</Text>
+                                        Total en Fijos: <Text style={styles.summaryHighlight}>${totalFixed.toFixed(2)} MXN</Text>
                                     </Text>
                                 </View>
                             </View>
@@ -292,12 +294,12 @@ export default function SetupScreen() {
                                 </View>
                                 <Text style={styles.title}>Ahorro y Ocio</Text>
                                 <Text style={styles.subtitle}>
-                                    Te quedan <Text style={styles.summaryHighlight}>${remainingFreeMoney.toFixed(2)} MXN</Text> libres.
+                                    Te quedan <Text style={styles.summaryHighlight}>${remainingAfterFixed.toFixed(2)} MXN</Text> libres.
                                     Repártelos entre tus metas de ahorro y entretenimiento.
                                 </Text>
 
                                 <View style={styles.inputBlock}>
-                                    <Text style={styles.inputLabel}> Meta de Ahorro Mensual</Text>
+                                    <Text style={styles.inputLabel}>🎯 Meta de Ahorro Mensual</Text>
                                     <View style={styles.amountInputContainer}>
                                         <Text style={styles.currencySymbol}>$</Text>
                                         <TextInput
@@ -313,7 +315,7 @@ export default function SetupScreen() {
                                 </View>
 
                                 <View style={styles.inputBlock}>
-                                    <Text style={styles.inputLabel}> Presupuesto para Ocio y Salidas</Text>
+                                    <Text style={styles.inputLabel}>🍿 Presupuesto para Ocio y Salidas</Text>
                                     <View style={styles.amountInputContainer}>
                                         <Text style={styles.currencySymbol}>$</Text>
                                         <TextInput
@@ -325,6 +327,37 @@ export default function SetupScreen() {
                                             onChangeText={setLeisure}
                                         />
                                         <Text style={styles.currencyCode}>MXN</Text>
+                                    </View>
+                                </View>
+
+                                {/* Tarjeta de retroalimentación en vivo sobre el dinero restante */}
+                                <View
+                                    style={[
+                                        styles.bufferCard,
+                                        unallocatedBuffer < 0 && styles.bufferCardError,
+                                    ]}
+                                >
+                                    <Ionicons
+                                        name={unallocatedBuffer < 0 ? 'alert-circle' : 'shield-checkmark-outline'}
+                                        size={22}
+                                        color={unallocatedBuffer < 0 ? '#F87171' : '#38BDF8'}
+                                    />
+                                    <View style={styles.bufferTextContainer}>
+                                        <Text
+                                            style={[
+                                                styles.bufferTitle,
+                                                unallocatedBuffer < 0 && styles.bufferTitleError,
+                                            ]}
+                                        >
+                                            {unallocatedBuffer < 0
+                                                ? 'Superaste tu disponible'
+                                                : `Colchón libre: $${unallocatedBuffer.toFixed(2)} MXN`}
+                                        </Text>
+                                        <Text style={styles.bufferDescription}>
+                                            {unallocatedBuffer < 0
+                                                ? `Te pasaste por $${Math.abs(unallocatedBuffer).toFixed(2)} MXN. Reduce el ahorro o el ocio.`
+                                                : 'Este dinero no comprometido permanece en tu cuenta como margen de seguridad para imprevistos.'}
+                                        </Text>
                                     </View>
                                 </View>
                             </View>
@@ -353,9 +386,12 @@ export default function SetupScreen() {
                                 </TouchableOpacity>
                             ) : (
                                 <TouchableOpacity
-                                    style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
+                                    style={[
+                                        styles.primaryButton,
+                                        (isLoading || unallocatedBuffer < 0) && styles.buttonDisabled,
+                                    ]}
                                     onPress={handleFinish}
-                                    disabled={isLoading}
+                                    disabled={isLoading || unallocatedBuffer < 0}
                                     activeOpacity={0.8}
                                 >
                                     {isLoading ? (
@@ -372,6 +408,7 @@ export default function SetupScreen() {
         </SafeAreaView>
     );
 }
+
 
 const styles = StyleSheet.create({
     safeArea: {
@@ -606,5 +643,41 @@ const styles = StyleSheet.create({
     },
     buttonDisabled: {
         opacity: 0.6,
+    },
+    bufferCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+        backgroundColor: '#0B0F17',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#24324D',
+        padding: 14,
+        width: '100%',
+        marginTop: 8,
+    },
+    bufferCardError: {
+        borderColor: '#F87171',
+        backgroundColor: 'rgba(248, 113, 113, 0.8)',
+    },
+    bufferTextContainer: {
+        flex: 1,
+    },
+    bufferTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#38BDF8',
+        marginTop: 2,
+    },
+    bufferTitleError: {
+        color: '#F87171',
+
+    },
+    bufferDescription: {
+        fontSize: 12,
+        color: '#94A3B8',
+        lineHeight: 16,
+
+
     },
 });
