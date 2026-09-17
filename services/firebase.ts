@@ -16,6 +16,7 @@ const requiredEnvVars = [
     process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 ];
 
+
 if (requiredEnvVars.some((v) => !v)) {
     throw new Error('Faltan variables de entorno para la configuración de Firebase.');
 }

@@ -39,7 +39,7 @@ const INITIAL_OPTIONS: ExpenseOption[] = [
 export default function SetupScreen() {
     const router = useRouter();
 
-    // Paso 1: Ingreso mensual | Paso 2: Gastos Fijos desglosados | Paso 3: Ahorro y Ocio
+    // Paso 1: Ingreso mensual | Paso 2: Gastos Fijos | Paso 3: Ahorro y Ocio
     const [step, setStep] = useState<number>(1);
 
     // Estados de datos
@@ -48,6 +48,7 @@ export default function SetupScreen() {
     const [savings, setSavings] = useState<string>('');
     const [leisure, setLeisure] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
+
     const numericIncome = parseFloat(income) || 0;
 
     // Totales calculados en memoria
@@ -65,7 +66,6 @@ export default function SetupScreen() {
     const totalAllocatedPaso3 = numericSaving + numericLeisure;
     const unallocatedBuffer = remainingAfterFixed - totalAllocatedPaso3;
 
-    // Selección/deselección de un gasto fijo
     const toggleExpense = (id: string) => {
         setExpenses((prev) =>
             prev.map((item) =>
@@ -76,7 +76,6 @@ export default function SetupScreen() {
         );
     };
 
-    // Cambio de monto individual en cada gasto fijo
     const updateExpenseAmount = (id: string, value: string) => {
         setExpenses((prev) =>
             prev.map((item) => (item.id === id ? { ...item, amount: value } : item))
@@ -165,12 +164,12 @@ export default function SetupScreen() {
         <SafeAreaView style={styles.safeArea}>
             <KeyboardAvoidingView
                 style={styles.keyboardView}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
             >
                 <ScrollView
                     contentContainerStyle={styles.scrollContainer}
                     keyboardShouldPersistTaps="handled"
-                    keyboardDismissMode="on-drag"
                     showsVerticalScrollIndicator={false}
                 >
                     <View style={styles.cardContainer}>
@@ -363,7 +362,7 @@ export default function SetupScreen() {
                             </View>
                         )}
 
-                        {/* Acciones de Navegación */}
+                        {/* Acciones de Navegación (Único bloque, sin duplicados) */}
                         <View style={styles.actionsContainer}>
                             {step > 1 && (
                                 <TouchableOpacity
@@ -409,7 +408,6 @@ export default function SetupScreen() {
     );
 }
 
-
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
@@ -422,7 +420,7 @@ const styles = StyleSheet.create({
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 20,
-        paddingVertical: 30,
+        paddingVertical: 24,
     },
     cardContainer: {
         backgroundColor: '#161F30',
@@ -604,6 +602,39 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
+    bufferCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+        backgroundColor: '#0B0F17',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#24324D',
+        padding: 14,
+        width: '100%',
+        marginTop: 8,
+    },
+    bufferCardError: {
+        borderColor: '#F87171',
+        backgroundColor: 'rgba(248, 113, 113, 0.08)',
+    },
+    bufferTextContainer: {
+        flex: 1,
+    },
+    bufferTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#38BDF8',
+        marginBottom: 2,
+    },
+    bufferTitleError: {
+        color: '#F87171',
+    },
+    bufferDescription: {
+        fontSize: 12,
+        color: '#94A3B8',
+        lineHeight: 16,
+    },
     actionsContainer: {
         flexDirection: 'row',
         gap: 12,
@@ -642,42 +673,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     buttonDisabled: {
-        opacity: 0.6,
-    },
-    bufferCard: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 12,
-        backgroundColor: '#0B0F17',
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: '#24324D',
-        padding: 14,
-        width: '100%',
-        marginTop: 8,
-    },
-    bufferCardError: {
-        borderColor: '#F87171',
-        backgroundColor: 'rgba(248, 113, 113, 0.8)',
-    },
-    bufferTextContainer: {
-        flex: 1,
-    },
-    bufferTitle: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#38BDF8',
-        marginTop: 2,
-    },
-    bufferTitleError: {
-        color: '#F87171',
-
-    },
-    bufferDescription: {
-        fontSize: 12,
-        color: '#94A3B8',
-        lineHeight: 16,
-
-
+        opacity: 0.5,
     },
 });

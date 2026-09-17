@@ -77,7 +77,7 @@ export default function ForgotPasswordScreen() {
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                 >
-                    {/* Botón superior de regreso */}
+
                     <TouchableOpacity
                         style={styles.backButton}
                         onPress={() => router.back()}
