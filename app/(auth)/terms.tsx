@@ -19,7 +19,7 @@ export default function TermsScreen() {
     const tapCount = useRef(0);
     const lastTap = useRef(0);
     const scaleAnim = useRef(new Animated.Value(1)).current;
-    const resetTimer = useRef<NodeJS.Timeout | null>(null);
+    const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const handleSecretTap = () => {
         const now = Date.now();
