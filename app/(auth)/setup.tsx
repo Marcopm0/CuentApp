@@ -1,3 +1,5 @@
+import { completeOnboarding, FixedExpense } from '@/services/onboardingService';
+import { DueBlock, PayFrequency } from '@/utils/periods';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -15,25 +17,24 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { completeOnboarding, FixedExpense } from '@/services/onboardingService';
-
 interface ExpenseOption {
     id: string;
     name: string;
     icon: keyof typeof Ionicons.glyphMap;
     selected: boolean;
     amount: string;
+    dueBlock: DueBlock; // 'start' | 'mid' | 'end'
 }
 
 const INITIAL_OPTIONS: ExpenseOption[] = [
-    { id: 'rent', name: 'Renta o Hipoteca', icon: 'home-outline', selected: false, amount: '' },
-    { id: 'electricity', name: 'Energía Eléctrica (Luz)', icon: 'flash-outline', selected: false, amount: '' },
-    { id: 'water', name: 'Agua Potable', icon: 'water-outline', selected: false, amount: '' },
-    { id: 'gas', name: 'Gas Doméstico', icon: 'flame-outline', selected: false, amount: '' },
-    { id: 'internet', name: 'Internet y Telefonía', icon: 'wifi-outline', selected: false, amount: '' },
-    { id: 'groceries', name: 'Despensa Básica', icon: 'cart-outline', selected: false, amount: '' },
-    { id: 'transport', name: 'Transporte / Gasolina', icon: 'car-outline', selected: false, amount: '' },
-    { id: 'subscriptions', name: 'Suscripciones Fijas', icon: 'tv-outline', selected: false, amount: '' },
+    { id: 'rent', name: 'Renta o Hipoteca', icon: 'home-outline', selected: false, amount: '', dueBlock: 'start' },
+    { id: 'electricity', name: 'Energía Eléctrica (Luz)', icon: 'flash-outline', selected: false, amount: '', dueBlock: 'mid' },
+    { id: 'water', name: 'Agua Potable', icon: 'water-outline', selected: false, amount: '', dueBlock: 'mid' },
+    { id: 'gas', name: 'Gas Doméstico', icon: 'flame-outline', selected: false, amount: '', dueBlock: 'mid' },
+    { id: 'internet', name: 'Internet y Telefonía', icon: 'wifi-outline', selected: false, amount: '', dueBlock: 'mid' },
+    { id: 'groceries', name: 'Despensa Básica', icon: 'cart-outline', selected: false, amount: '', dueBlock: 'start' },
+    { id: 'transport', name: 'Transporte / Gasolina', icon: 'car-outline', selected: false, amount: '', dueBlock: 'mid' },
+    { id: 'subscriptions', name: 'Suscripciones Fijas', icon: 'tv-outline', selected: false, amount: '', dueBlock: 'mid' },
 ];
 
 export default function SetupScreen() {
@@ -43,13 +44,24 @@ export default function SetupScreen() {
     const [step, setStep] = useState<number>(1);
 
     // Estados de datos
-    const [income, setIncome] = useState<string>('');
+    // Frecuencia y monto por periodo
+    const [payFrequency, setPayFrequency] = useState<PayFrequency>('biweekly');
+    const [payDayOfWeek, setPayDayOfWeek] = useState<number>(5); // default Viernes = 5
+    const [periodAmount, setPeriodAmount] = useState<string>('');
+
+    // Cálculo automático del ingreso mensual normalizado
+    const numericPeriodAmount = parseFloat(periodAmount) || 0;
+    const numericIncome = useMemo(() => {
+        if (payFrequency === 'monthly') return numericPeriodAmount;
+        if (payFrequency === 'biweekly') return numericPeriodAmount * 2;
+        return numericPeriodAmount * 4; // weekly
+    }, [payFrequency, numericPeriodAmount]);
     const [expenses, setExpenses] = useState<ExpenseOption[]>(INITIAL_OPTIONS);
     const [savings, setSavings] = useState<string>('');
     const [leisure, setLeisure] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
 
-    const numericIncome = parseFloat(income) || 0;
+
 
     // Totales calculados en memoria
     const totalFixed = useMemo(() => {
@@ -82,9 +94,15 @@ export default function SetupScreen() {
         );
     };
 
+    const updateExpenseDueBlock = (id: string, dueBlock: DueBlock) => {
+        setExpenses((prev) =>
+            prev.map((item) => (item.id === id ? { ...item, dueBlock } : item))
+        );
+    };
+
     const handleNext = () => {
         if (step === 1) {
-            if (!income || numericIncome <= 0) {
+            if (!periodAmount || numericIncome <= 0) {
                 Alert.alert('Monto requerido', 'Por favor ingresa tu ingreso mensual disponible.');
                 return;
             }
@@ -116,11 +134,8 @@ export default function SetupScreen() {
 
     const handleBack = () => {
         if (step === 2) {
-            setExpenses(INITIAL_OPTIONS);
             setStep(1);
         } else if (step === 3) {
-            setSavings('');
-            setLeisure('');
             setStep(2);
         }
     };
@@ -142,10 +157,14 @@ export default function SetupScreen() {
                     id: e.id,
                     name: e.name,
                     amount: parseFloat(e.amount),
+                    dueBlock: e.dueBlock,
                 }));
 
             await completeOnboarding({
                 monthlyIncome: numericIncome,
+                payFrequency: payFrequency,
+                payDayOfWeek: payFrequency === 'weekly' ? payDayOfWeek : undefined,
+                amountPerPeriod: numericPeriodAmount,
                 fixedExpenses: activeExpenses,
                 savingsTarget: numericSaving,
                 leisureBudget: numericLeisure,
@@ -187,14 +206,100 @@ export default function SetupScreen() {
                         </View>
 
                         {/* PASO 1: Ingreso Mensual */}
+                        {/* PASO 1: Periodicidad e Ingreso */}
                         {step === 1 && (
                             <View style={styles.stepContent}>
                                 <View style={styles.iconCircle}>
                                     <Ionicons name="wallet-outline" size={32} color="#38BDF8" />
                                 </View>
-                                <Text style={styles.title}>¿Cuál es tu ingreso mensual?</Text>
+                                <Text style={styles.title}>¿Cómo recibes tus ingresos?</Text>
                                 <Text style={styles.subtitle}>
-                                    Con esto partiremos para crear tu control de gastos.
+                                    Adaptaremos los recordatorios de nómina a tus fechas reales de cobro.
+                                </Text>
+
+                                {/* Selector de Frecuencia */}
+                                <View style={styles.freqSelectorRow}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.freqChip,
+                                            payFrequency === 'weekly' && styles.freqChipActive,
+                                        ]}
+                                        onPress={() => setPayFrequency('weekly')}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={[styles.freqChipText, payFrequency === 'weekly' && styles.freqChipTextActive]}>
+                                            Semanal
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.freqChip,
+                                            payFrequency === 'biweekly' && styles.freqChipActive,
+                                        ]}
+                                        onPress={() => setPayFrequency('biweekly')}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={[styles.freqChipText, payFrequency === 'biweekly' && styles.freqChipTextActive]}>
+                                            Quincenal
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.freqChip,
+                                            payFrequency === 'monthly' && styles.freqChipActive,
+                                        ]}
+                                        onPress={() => setPayFrequency('monthly')}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={[styles.freqChipText, payFrequency === 'monthly' && styles.freqChipTextActive]}>
+                                            Mensual
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Selector de día de cobro semanal */}
+                                {payFrequency === 'weekly' && (
+                                    <View style={styles.daySelectorWrapper}>
+                                        <Text style={styles.inputLabelPeriod}>¿Qué día recibes tu cobro semanal?</Text>
+                                        <View style={styles.daySelectorRow}>
+                                            {[
+                                                { label: 'Lunes', value: 1 },
+                                                { label: 'Jueves', value: 4 },
+                                                { label: 'Viernes', value: 5 },
+                                                { label: 'Sábado', value: 6 },
+                                            ].map((d) => (
+                                                <TouchableOpacity
+                                                    key={d.value}
+                                                    style={[
+                                                        styles.dayChip,
+                                                        payDayOfWeek === d.value && styles.dayChipActive,
+                                                    ]}
+                                                    onPress={() => setPayDayOfWeek(d.value)}
+                                                    activeOpacity={0.7}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.dayChipText,
+                                                            payDayOfWeek === d.value && styles.dayChipTextActive,
+                                                        ]}
+                                                    >
+                                                        {d.label}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
+                                )}
+
+                                {/* Input de Monto por Pago */}
+                                <Text style={styles.inputLabelPeriod}>
+                                    {payFrequency === 'weekly'
+                                        ? '¿Cuánto cobras cada semana?'
+                                        : payFrequency === 'biweekly'
+                                            ? '¿Cuánto cobras cada quincena?'
+                                            : '¿Cuánto cobras al mes?'}
                                 </Text>
 
                                 <View style={styles.amountInputContainer}>
@@ -204,12 +309,26 @@ export default function SetupScreen() {
                                         placeholder="0.00"
                                         placeholderTextColor="#475569"
                                         keyboardType="numeric"
-                                        value={income}
-                                        onChangeText={setIncome}
+                                        value={periodAmount}
+                                        onChangeText={setPeriodAmount}
                                         autoFocus
                                     />
                                     <Text style={styles.currencyCode}>MXN</Text>
                                 </View>
+
+                                {/* Nota de conversión al mes */}
+                                {numericPeriodAmount > 0 && payFrequency !== 'monthly' && (
+                                    <View style={styles.monthlyEquivalentBadge}>
+                                        <Ionicons name="information-circle-outline" size={16} color="#38BDF8" />
+                                        <Text style={styles.monthlyEquivalentText}>
+                                            Equivale a un ingreso de{' '}
+                                            <Text style={styles.summaryHighlight}>
+                                                ${numericIncome.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                                            </Text>{' '}
+                                            al mes para tus presupuestos base.
+                                        </Text>
+                                    </View>
+                                )}
                             </View>
                         )}
 
@@ -259,18 +378,79 @@ export default function SetupScreen() {
                                             </TouchableOpacity>
 
                                             {item.selected && (
-                                                <View style={styles.expenseInputRow}>
-                                                    <Text style={styles.smallCurrency}>$</Text>
-                                                    <TextInput
-                                                        style={styles.expenseInput}
-                                                        placeholder="Monto mensual"
-                                                        placeholderTextColor="#475569"
-                                                        keyboardType="numeric"
-                                                        value={item.amount}
-                                                        onChangeText={(val) => updateExpenseAmount(item.id, val)}
-                                                        autoFocus
-                                                    />
-                                                    <Text style={styles.smallCode}>MXN</Text>
+                                                <View style={styles.expenseConfigContainer}>
+                                                    <View style={styles.expenseInputRow}>
+                                                        <Text style={styles.smallCurrency}>$</Text>
+                                                        <TextInput
+                                                            style={styles.expenseInput}
+                                                            placeholder="Monto mensual"
+                                                            placeholderTextColor="#475569"
+                                                            keyboardType="numeric"
+                                                            value={item.amount}
+                                                            onChangeText={(val) => updateExpenseAmount(item.id, val)}
+                                                            autoFocus
+                                                        />
+                                                        <Text style={styles.smallCode}>MXN</Text>
+                                                    </View>
+
+                                                    <View style={styles.dueBlockWrapper}>
+                                                        <Text style={styles.dueBlockSectionLabel}>¿En qué periodo del mes se paga?</Text>
+                                                        <View style={styles.dueBlockRow}>
+                                                            <TouchableOpacity
+                                                                style={[
+                                                                    styles.dueBlockChip,
+                                                                    item.dueBlock === 'start' && styles.dueBlockChipActive,
+                                                                ]}
+                                                                onPress={() => updateExpenseDueBlock(item.id, 'start')}
+                                                                activeOpacity={0.7}
+                                                            >
+                                                                <Text
+                                                                    style={[
+                                                                        styles.dueBlockChipText,
+                                                                        item.dueBlock === 'start' && styles.dueBlockChipTextActive,
+                                                                    ]}
+                                                                >
+                                                                    1-10 (Principio)
+                                                                </Text>
+                                                            </TouchableOpacity>
+
+                                                            <TouchableOpacity
+                                                                style={[
+                                                                    styles.dueBlockChip,
+                                                                    item.dueBlock === 'mid' && styles.dueBlockChipActive,
+                                                                ]}
+                                                                onPress={() => updateExpenseDueBlock(item.id, 'mid')}
+                                                                activeOpacity={0.7}
+                                                            >
+                                                                <Text
+                                                                    style={[
+                                                                        styles.dueBlockChipText,
+                                                                        item.dueBlock === 'mid' && styles.dueBlockChipTextActive,
+                                                                    ]}
+                                                                >
+                                                                    11-20 (Mediados)
+                                                                </Text>
+                                                            </TouchableOpacity>
+
+                                                            <TouchableOpacity
+                                                                style={[
+                                                                    styles.dueBlockChip,
+                                                                    item.dueBlock === 'end' && styles.dueBlockChipActive,
+                                                                ]}
+                                                                onPress={() => updateExpenseDueBlock(item.id, 'end')}
+                                                                activeOpacity={0.7}
+                                                            >
+                                                                <Text
+                                                                    style={[
+                                                                        styles.dueBlockChipText,
+                                                                        item.dueBlock === 'end' && styles.dueBlockChipTextActive,
+                                                                    ]}
+                                                                >
+                                                                    21-31 (Fin)
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    </View>
                                                 </View>
                                             )}
                                         </View>
@@ -674,5 +854,128 @@ const styles = StyleSheet.create({
     },
     buttonDisabled: {
         opacity: 0.5,
+    },
+    freqSelectorRow: {
+        flexDirection: 'row',
+        gap: 8,
+        width: '100%',
+        marginVertical: 12,
+    },
+    freqChip: {
+        flex: 1,
+        backgroundColor: '#0B0F17',
+        paddingVertical: 12,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1.5,
+        borderColor: '#24324D',
+    },
+    freqChipActive: {
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    },
+    freqChipText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#94A3B8',
+    },
+    freqChipTextActive: {
+        color: '#38BDF8',
+    },
+    inputLabelPeriod: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#E2E8F0',
+        alignSelf: 'flex-start',
+        marginTop: 10,
+        marginBottom: 6,
+    },
+    monthlyEquivalentBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(56, 189, 248, 0.08)',
+        borderRadius: 10,
+        padding: 10,
+        gap: 6,
+        marginTop: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(56, 189, 248, 0.2)',
+    },
+    monthlyEquivalentText: {
+        fontSize: 12,
+        color: '#94A3B8',
+        flex: 1,
+    },
+    daySelectorWrapper: {
+        width: '100%',
+        marginTop: 6,
+    },
+    daySelectorRow: {
+        flexDirection: 'row',
+        gap: 8,
+        width: '100%',
+        marginTop: 6,
+    },
+    dayChip: {
+        flex: 1,
+        backgroundColor: '#0B0F17',
+        paddingVertical: 10,
+        borderRadius: 10,
+        alignItems: 'center',
+        borderWidth: 1.5,
+        borderColor: '#24324D',
+    },
+    dayChipActive: {
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    },
+    dayChipText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#94A3B8',
+    },
+    dayChipTextActive: {
+        color: '#38BDF8',
+    },
+    expenseConfigContainer: {
+        gap: 8,
+        width: '100%',
+    },
+    dueBlockWrapper: {
+        gap: 6,
+        width: '100%',
+        marginTop: 2,
+    },
+    dueBlockSectionLabel: {
+        fontSize: 12,
+        color: '#94A3B8',
+        fontWeight: '600',
+    },
+    dueBlockRow: {
+        flexDirection: 'row',
+        gap: 6,
+        width: '100%',
+    },
+    dueBlockChip: {
+        flex: 1,
+        backgroundColor: '#161F30',
+        paddingVertical: 8,
+        borderRadius: 8,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#24324D',
+    },
+    dueBlockChipActive: {
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    },
+    dueBlockChipText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#94A3B8',
+    },
+    dueBlockChipTextActive: {
+        color: '#38BDF8',
+        fontWeight: '700',
     },
 });

@@ -1,4 +1,5 @@
 // services/onboardingService.ts
+import { DueBlock, getPeriodInfo, PayFrequency } from '@/utils/periods';
 import {
     collection,
     doc,
@@ -11,10 +12,14 @@ export interface FixedExpense {
     id: string;
     name: string;
     amount: number;
+    dueBlock: DueBlock;
 }
 
 export interface OnboardingPayload {
     monthlyIncome: number;
+    payFrequency: PayFrequency;
+    payDayOfWeek?: number;
+    amountPerPeriod: number;
     fixedExpenses: FixedExpense[];
     savingsTarget: number;
     leisureBudget: number;
@@ -39,20 +44,26 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
     const batch = writeBatch(db);
     const now = new Date();
     const monthYear = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const currentPeriod = getPeriodInfo(data.payFrequency, data.payDayOfWeek);
 
-    // 1. Registrar el ingreso/saldo inicial como transacción de apertura
-    if (data.monthlyIncome > 0) {
+    // 1. Inyectar el primer abono con la periodKey del ciclo actual
+    const initialAmount = data.amountPerPeriod > 0 ? data.amountPerPeriod : data.monthlyIncome;
+    if (initialAmount > 0) {
         const txRef = doc(collection(db, 'transactions'));
         batch.set(txRef, {
             id: txRef.id,
             userId: currentUser.uid,
             sharedFundId: null,
             type: 'income',
-            amount: data.monthlyIncome,
-            category: 'Ingreso Inicial',
-            description: 'Ingreso mensual base reportado en configuración inicial',
+            amount: initialAmount,
+            category: '💵 Sueldo',
+            description: `Primer cobro (${currentPeriod.label})`,
+            targetBucket: 'leisure',
+            periodKey: currentPeriod.periodKey,
+            monthYear,
             date: serverTimestamp(),
             createdAt: serverTimestamp(),
+            isShared: false,
         });
     }
 
@@ -71,6 +82,7 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
                 currentSpent: 0,
                 monthYear,
                 isFixedExpense: true,
+                dueBlock: expense.dueBlock || 'mid', // Bloque de vencimiento (start | mid | end)
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
             });
@@ -95,18 +107,27 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
         });
     }
 
-    // 4. Actualizar el perfil del usuario con metas, fijos habituales y cerrar onboarding
+    // 4. Actualizar el perfil del usuario con metas, periodicidad de nómina, fijos y cerrar onboarding
     const userRef = doc(db, 'users', currentUser.uid);
-    batch.update(userRef, {
+    const userUpdateData: Record<string, any> = {
         hasCompletedOnboarding: true,
         monthlyIncome: data.monthlyIncome,
+        payFrequency: data.payFrequency,
+        amountPerPeriod: data.amountPerPeriod,
         savingsTarget: data.savingsTarget,
         habitualFixedExpenses: data.fixedExpenses.map((expense) => ({
             name: expense.name,
             defaultAmount: expense.amount,
+            dueBlock: expense.dueBlock,
         })),
         updatedAt: serverTimestamp(),
-    });
+    };
+
+    if (data.payFrequency === 'weekly' && data.payDayOfWeek !== undefined) {
+        userUpdateData.payDayOfWeek = data.payDayOfWeek;
+    }
+
+    batch.update(userRef, userUpdateData);
 
     // Ejecución atómica de todas las operaciones
     await batch.commit();
