@@ -1,8 +1,11 @@
 import { ThemedText } from '@/components/themed-text';
 import { auth, db } from '@/services/firebase';
-import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { DueBlock, getPeriodInfo, PayFrequency } from '@/utils/periods';
+import { Ionicons } from '@expo/vector-icons';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+
 
 interface Budget {
   id: string;
@@ -10,6 +13,7 @@ interface Budget {
   limitAmount: number;
   currentSpent: number;
   isFixedExpense: boolean;
+  dueBlock?: DueBlock;
 }
 
 interface Transaction {
@@ -24,10 +28,15 @@ interface Transaction {
 
 export default function HomeScreen() {
   const [userName, setUserName] = useState<string>('Usuario');
-  const [budgets, setBudgets] = useState<Budget[]>([])
-  const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [monthlyIncome, setMonthlyIncome] = useState<number>(0)
-  const [savingsTarget, setSavingTarget] = useState<number>(0)
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [monthlyIncome, setMonthlyIncome] = useState<number>(0);
+  const [savingsTarget, setSavingTarget] = useState<number>(0);
+  // Estados para periodicidad de pago
+  const [payFrequency, setPayFrequency] = useState<PayFrequency>('biweekly');
+  const [payDayOfWeek, setPayDayOfWeek] = useState<number>(5);
+  const [amountPerPeriod, setAmountPerPeriod] = useState<number>(0);
+  const [isAbonando, setIsAbonando] = useState<boolean>(false);
 
   //Para el registro de gastos
   const ultimosMovimientos = useMemo(() => {
@@ -74,11 +83,30 @@ export default function HomeScreen() {
           const data = userDocSnap.data();
           const nombre = data.displayName || data.name;
           if (nombre) setUserName(nombre.split(' ')[0]);
-          if (data.monthlyIncome) setMonthlyIncome(data.monthlyIncome);
-          if (data.savingsTarget) setSavingTarget(data.savingsTarget);
+          const ingresoTotal = Number(data.monthlyIncome) || 0;
+          if (ingresoTotal) setMonthlyIncome(ingresoTotal);
+          if (data.savingsTarget) setSavingTarget(Number(data.savingsTarget) || 0);
+
+          // Frecuencia de cobro (quincenal por defecto)
+          const freq = (data.payFrequency as PayFrequency) || 'biweekly';
+          setPayFrequency(freq);
+          if (data.payDayOfWeek !== undefined) {
+            setPayDayOfWeek(Number(data.payDayOfWeek));
+          }
+
+          // Si ya tiene guardado amountPerPeriod úsalo; si no, calcula según su periodicidad
+          const periodAmount = data.amountPerPeriod
+            ? Number(data.amountPerPeriod)
+            : freq === 'biweekly'
+              ? ingresoTotal / 2
+              : freq === 'weekly'
+                ? ingresoTotal / 4
+                : ingresoTotal;
+
+          setAmountPerPeriod(periodAmount);
         }
       } catch (error) {
-        console.error('Error al leer los datos del usuario:', error)
+        console.error('Error al leer los datos del usuario:', error);
       }
     };
     fetchUserData();
@@ -118,10 +146,15 @@ export default function HomeScreen() {
   }, [currentMonthYear]);
 
   // ─────────────────────────────────────────────────────────────
-  // CÁLCULO DE: DISPONIBLE PARA GASTAR
+  // DETERMINAR PERIODO ACTIVO (Quincenas, Mes, Semanas reales móviles)
   // ─────────────────────────────────────────────────────────────
+  const periodInfo = useMemo(
+    () => getPeriodInfo(payFrequency, payDayOfWeek),
+    [payFrequency, payDayOfWeek]
+  );
+
   // ─────────────────────────────────────────────────────────────
-  // CÁLCULOS REACTIVOS: DISPONIBLE Y SEMÁFORO CON TARGET BUCKETS
+  // CÁLCULO DEL DISPONIBLE POR PERIODO Y FLUJO DE EFECTIVO REAL
   // ─────────────────────────────────────────────────────────────
   const {
     totalAvailable,
@@ -137,50 +170,71 @@ export default function HomeScreen() {
     progressPercentage,
     mensajePie,
   } = useMemo(() => {
-    // 1. Ocio base y gastos fijos base del setup
-    const leisureDoc = budgets.find((b) => !b.isFixedExpense);
-    const leisureBase = leisureDoc ? Number(leisureDoc.limitAmount) || 0 : 0;
+    // 1. Divisor proporcional para apartados mensuales según periodicidad
+    const divisor = payFrequency === 'weekly' ? 4 : payFrequency === 'biweekly' ? 2 : 1;
 
-    const totalFixed = budgets
-      .filter((b) => b.isFixedExpense)
+    // 2. Gastos fijos que vencen en este periodo según activeBlocks (start: 1-10, mid: 11-20, end: 21-31)
+    const fijosDelPeriodo = budgets
+      .filter((b) => b.isFixedExpense && b.dueBlock && periodInfo.activeBlocks.includes(b.dueBlock))
       .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
 
-    // 2. Colchón base del setup
-    const bufferBase = Math.max(
-      0,
-      monthlyIncome - (totalFixed + savingsTarget + leisureBase)
+    // 3. Cuota proporcional de ahorro
+    const cuotaAhorro = (savingsTarget || 0) / divisor;
+
+    // 4. Ocio asignado para este periodo
+    const leisureDoc = budgets.find((b) => !b.isFixedExpense);
+    const leisureBudget = leisureDoc ? Number(leisureDoc.limitAmount) || 0 : 0;
+    const ocioPeriodo = leisureBudget / divisor;
+
+    // 5. Colchón del periodo es lo que resta del cobro de este ciclo tras fijos, ahorro y ocio:
+    const periodBuffer = Math.max(0, amountPerPeriod - (fijosDelPeriodo + cuotaAhorro + ocioPeriodo));
+
+    // Determina si una transacción pertenece al ciclo activo
+    const isTxInCurrentPeriod = (t: Transaction): boolean => {
+      if ((t as any).periodKey) {
+        return (t as any).periodKey === periodInfo.periodKey;
+      }
+      if (periodInfo.startDate && periodInfo.endDate) {
+        const time = t.createdAt?.toMillis
+          ? t.createdAt.toMillis()
+          : (t.createdAt?.seconds ? t.createdAt.seconds * 1000 : null);
+        if (time) {
+          const txDate = new Date(time);
+          return txDate >= periodInfo.startDate && txDate <= periodInfo.endDate;
+        }
+      }
+      return (t as any).monthYear === currentMonthYear;
+    };
+
+    // 6. Ingresos extraordinarios del ciclo (excluyendo el cobro regular base y el ingreso inicial)
+    const periodIncomes = transactions.filter(
+      (t) => t.type === 'income' && t.category !== 'Ingreso Inicial' && isTxInCurrentPeriod(t)
     );
 
-    // 3. Filtrar ingresos extras (excluyendo el inicial)
-    const validIncomes = transactions.filter(
-      (t) => t.type === 'income' && t.category !== 'Ingreso Inicial'
-    );
-
-    // Reparto según la bolsa elegida por el usuario:
-    const extraOcio = validIncomes
-      .filter((t) => t.targetBucket === 'leisure' || !t.targetBucket)
+    const extraOcio = periodIncomes
+      .filter((t) => t.category !== '💵 Sueldo' && (t.targetBucket === 'leisure' || !t.targetBucket))
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-    const extraColchon = validIncomes
+    const extraColchon = periodIncomes
       .filter((t) => t.targetBucket === 'buffer')
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-    // 4. Límites efectivos ampliados
-    const effectiveLeisureLimit = leisureBase + extraOcio;
-    const effectiveBufferInitial = bufferBase + extraColchon;
+    // 7. Límites efectivos del periodo
+    const effectiveLeisureLimit = ocioPeriodo + extraOcio;
+    const effectiveBufferInitial = periodBuffer + extraColchon;
     const userHasBuffer = effectiveBufferInitial > 0;
 
-    // 5. Gastos variables del día a día
-    const variableExpenses = transactions
-      .filter((t) => t.type === 'expense' && t.category !== 'Gasto Fijo')
+    // 8. Gastos variables del periodo (excluyendo fijos ya descontados de la nómina)
+    const gastosVariablesDelPeriodo = transactions
+      .filter((t) => t.type === 'expense' && t.category !== 'Gasto Fijo' && isTxInCurrentPeriod(t))
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-    // 6. Disponible Real para gastar hoy
-    const balance = effectiveLeisureLimit + effectiveBufferInitial - variableExpenses;
+    // 9. Disponible real del periodo que refleja fielmente la liquidez
+    const balance = effectiveLeisureLimit + effectiveBufferInitial - gastosVariablesDelPeriodo;
 
-    // 7. Cascada de Ocio y Colchón
-    const lRemaining = Math.max(0, effectiveLeisureLimit - variableExpenses);
-    const overspent = Math.max(0, variableExpenses - effectiveLeisureLimit);
+    // 10. Cascada de Ocio y Colchón
+    const lRemaining = Math.max(0, effectiveLeisureLimit - gastosVariablesDelPeriodo);
+    const overspent = Math.max(0, gastosVariablesDelPeriodo - effectiveLeisureLimit);
 
     let bRemaining = 0;
     let touchingBuffer = false;
@@ -191,10 +245,10 @@ export default function HomeScreen() {
       touchingBuffer = overspent > 0;
       overdrawn = overspent > effectiveBufferInitial;
     } else {
-      overdrawn = variableExpenses > effectiveLeisureLimit;
+      overdrawn = gastosVariablesDelPeriodo > effectiveLeisureLimit;
     }
 
-    // 8. Semáforo dinámico
+    // 11. Semáforo dinámico
     let color = '#10B981';
     let label = 'Bajo Control';
     let progress = 0;
@@ -209,7 +263,7 @@ export default function HomeScreen() {
           ? `¡Cuidado! Te pasaste por $${(overspent - effectiveBufferInitial).toFixed(2)} de tu colchón.`
           : `Has consumido $${overspent.toFixed(2)} de tu reserva de imprevistos.`;
       } else {
-        const pct = effectiveLeisureLimit > 0 ? (variableExpenses / effectiveLeisureLimit) * 100 : 0;
+        const pct = effectiveLeisureLimit > 0 ? (gastosVariablesDelPeriodo / effectiveLeisureLimit) * 100 : 0;
         progress = Math.min(100, pct);
         if (pct > 65) {
           color = '#F59E0B';
@@ -220,12 +274,12 @@ export default function HomeScreen() {
         }
       }
     } else {
-      const pct = effectiveLeisureLimit > 0 ? (variableExpenses / effectiveLeisureLimit) * 100 : 0;
+      const pct = effectiveLeisureLimit > 0 ? (gastosVariablesDelPeriodo / effectiveLeisureLimit) * 100 : 0;
       progress = Math.min(100, pct);
       if (overdrawn) {
         color = '#EF4444';
         label = 'Sobregirado';
-        pie = `Te has pasado de tu dinero asignado por $${(variableExpenses - effectiveLeisureLimit).toFixed(2)}.`;
+        pie = `Te has pasado de tu dinero asignado por $${(gastosVariablesDelPeriodo - effectiveLeisureLimit).toFixed(2)}.`;
       } else if (pct > 70) {
         color = '#F59E0B';
         label = 'Precaución';
@@ -249,7 +303,75 @@ export default function HomeScreen() {
       progressPercentage: progress,
       mensajePie: pie,
     };
-  }, [budgets, transactions, monthlyIncome, savingsTarget]);
+  }, [budgets, transactions, payFrequency, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear]);
+
+  // ─────────────────────────────────────────────────────────────
+  // VALIDACIÓN Y ACCIÓN DE ABONO DE NÓMINA CON GESTIÓN DE SOBRANTE
+  // ─────────────────────────────────────────────────────────────
+  // Revisa si en las transacciones del mes ya se cobró este periodo
+  const yaCobrado = useMemo(() => {
+    return transactions.some(
+      (t) => t.type === 'income' && (t as any).periodKey === periodInfo.periodKey && t.category === '💵 Sueldo'
+    );
+  }, [transactions, periodInfo]);
+
+  const handleAbonar = async (surplus: number = 0, targetBucket?: 'savings' | 'buffer') => {
+    const user = auth.currentUser;
+    if (!user || amountPerPeriod <= 0 || isAbonando) return;
+
+    setIsAbonando(true);
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Abono de sueldo del nuevo periodo
+      const sueldoRef = doc(collection(db, 'transactions'));
+      batch.set(sueldoRef, {
+        id: sueldoRef.id,
+        userId: user.uid,
+        type: 'income',
+        amount: amountPerPeriod,
+        category: '💵 Sueldo',
+        description: `Cobro ${periodInfo.label}`,
+        targetBucket: 'leisure',
+        periodKey: periodInfo.periodKey,
+        monthYear: currentMonthYear,
+        date: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        isShared: false,
+        sharedFundId: null,
+      });
+
+      // 2. Si hay remanente positivo a favor del ciclo anterior, aplicar según decisión
+      if (surplus > 0 && targetBucket) {
+        const surplusRef = doc(collection(db, 'transactions'));
+        const isSavings = targetBucket === 'savings';
+        batch.set(surplusRef, {
+          id: surplusRef.id,
+          userId: user.uid,
+          type: 'income',
+          amount: surplus,
+          category: isSavings ? '🎯 Ahorro' : '🛡️ Colchón',
+          description: isSavings
+            ? 'Sobrante ciclo anterior -> Meta de Ahorro'
+            : 'Sobrante ciclo anterior -> Colchón Extra',
+          targetBucket: targetBucket,
+          periodKey: periodInfo.periodKey,
+          monthYear: currentMonthYear,
+          date: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          isShared: false,
+          sharedFundId: null,
+        });
+      }
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error al abonar sueldo:', error);
+      Alert.alert('Error', 'No se pudo procesar el cobro del periodo.');
+    } finally {
+      setIsAbonando(false);
+    }
+  };
 
 
   return (
@@ -262,6 +384,92 @@ export default function HomeScreen() {
             <ThemedText style={styles.miniwigdettext}>{todayFormatted}</ThemedText>
           </TouchableOpacity>
         </View>
+        {/************************* Banner de Abono de Nómina y Gestión del Sobrante ****************************/}
+        {!yaCobrado && amountPerPeriod > 0 && (
+          <View style={styles.bannerCobro}>
+            <View style={styles.bannerHeaderRow}>
+              <View style={styles.bannerInfo}>
+                <ThemedText style={styles.bannerTitulo}>
+                  💵 ¡Llegó tu {periodInfo.label}!
+                </ThemedText>
+                <ThemedText style={styles.bannerMonto}>
+                  ${amountPerPeriod.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                </ThemedText>
+              </View>
+
+              {totalAvailable <= 0 && (
+                <TouchableOpacity
+                  style={[styles.bannerBtn, isAbonando && styles.buttonDisabled]}
+                  onPress={() => handleAbonar(0)}
+                  disabled={isAbonando}
+                  activeOpacity={0.8}
+                >
+                  {isAbonando ? (
+                    <ActivityIndicator size="small" color="#0B0F17" />
+                  ) : (
+                    <ThemedText style={styles.bannerBtnText}>Abonar</ThemedText>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {totalAvailable > 0 && (
+              <View style={styles.bannerSobranteSection}>
+                <View style={styles.bannerSobranteDivider} />
+                <View style={styles.bannerSobranteBadge}>
+                  <Ionicons name="sparkles" size={15} color="#34D399" />
+                  <ThemedText style={styles.bannerSobranteText}>
+                    Sobrante a favor del ciclo anterior:{' '}
+                    <ThemedText style={styles.bannerSobranteHighlight}>
+                      +${totalAvailable.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                    </ThemedText>
+                  </ThemedText>
+                </View>
+                <ThemedText style={styles.bannerSobrantePregunta}>
+                  ¿Qué deseas hacer con tu saldo remanente?
+                </ThemedText>
+
+                <View style={styles.bannerSobranteActions}>
+                  <TouchableOpacity
+                    style={[styles.bannerChoiceBtnSavings, isAbonando && styles.buttonDisabled]}
+                    onPress={() => handleAbonar(totalAvailable, 'savings')}
+                    disabled={isAbonando}
+                    activeOpacity={0.8}
+                  >
+                    {isAbonando ? (
+                      <ActivityIndicator size="small" color="#0B0F17" />
+                    ) : (
+                      <>
+                        <Ionicons name="save-outline" size={16} color="#0B0F17" />
+                        <ThemedText style={styles.bannerChoiceBtnText}>
+                          Mandar a Ahorro
+                        </ThemedText>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.bannerChoiceBtnBuffer, isAbonando && styles.buttonDisabled]}
+                    onPress={() => handleAbonar(totalAvailable, 'buffer')}
+                    disabled={isAbonando}
+                    activeOpacity={0.8}
+                  >
+                    {isAbonando ? (
+                      <ActivityIndicator size="small" color="#0B0F17" />
+                    ) : (
+                      <>
+                        <Ionicons name="shield-checkmark-outline" size={16} color="#0B0F17" />
+                        <ThemedText style={styles.bannerChoiceBtnText}>
+                          Colchón Extra
+                        </ThemedText>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
 
         {/***************Tarjeta de gastos disponibles **********************/}
         <View style={[styles.widget, isTouchingBuffer && styles.widgetWarning, isOverdrawn && styles.widgetDanger]}>
@@ -425,10 +633,6 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
-
-
-
-
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -650,5 +854,112 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     marginTop: 2,
   },
-
+  bannerCobro: {
+    width: '90%',
+    backgroundColor: '#161F30',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#10B981',
+    gap: 12,
+  },
+  bannerHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  },
+  bannerInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  bannerTitulo: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#10B981',
+    textTransform: 'uppercase',
+  },
+  bannerMonto: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  bannerBtn: {
+    backgroundColor: '#10B981',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  bannerBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0B0F17',
+  },
+  bannerSobranteSection: {
+    width: '100%',
+    gap: 8,
+  },
+  bannerSobranteDivider: {
+    height: 1,
+    backgroundColor: 'rgba(16, 185, 129, 0.25)',
+    width: '100%',
+  },
+  bannerSobranteBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  bannerSobranteText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    flex: 1,
+  },
+  bannerSobranteHighlight: {
+    color: '#34D399',
+    fontWeight: '700',
+  },
+  bannerSobrantePregunta: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#E2E8F0',
+  },
+  bannerSobranteActions: {
+    flexDirection: 'row',
+    gap: 8,
+    width: '100%',
+  },
+  bannerChoiceBtnSavings: {
+    flex: 1,
+    backgroundColor: '#38BDF8',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  bannerChoiceBtnBuffer: {
+    flex: 1,
+    backgroundColor: '#34D399',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  bannerChoiceBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0B0F17',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
 });
