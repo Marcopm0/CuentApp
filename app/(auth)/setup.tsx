@@ -1,5 +1,5 @@
 import { completeOnboarding, FixedExpense } from '@/services/onboardingService';
-import { DueBlock, PayFrequency } from '@/utils/periods';
+import { DueBlock, getNextCycleBlocks, PayFrequency } from '@/utils/periods';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -60,8 +60,8 @@ export default function SetupScreen() {
     const [savings, setSavings] = useState<string>('');
     const [leisure, setLeisure] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
-
-
+    // Pregunta de sincronización para inicio de ciclo
+    const [hasPreSavedNextCycle, setHasPreSavedNextCycle] = useState<boolean | null>(null);
 
     // Totales calculados en memoria
     const totalFixed = useMemo(() => {
@@ -71,6 +71,31 @@ export default function SetupScreen() {
             return acc + (isNaN(val) ? 0 : val);
         }, 0);
     }, [expenses]);
+
+    // Bloques del ciclo entrante inmediato (ej. Q2 -> Q1 con bloque start/mid)
+    const nextCycleBlocks = useMemo(() => {
+        if (payFrequency === 'monthly') return [];
+        return getNextCycleBlocks(payFrequency, payDayOfWeek);
+    }, [payFrequency, payDayOfWeek]);
+
+    // Gastos que vencen en el ciclo entrante inmediato
+    const nextCycleExpenses = useMemo(() => {
+        if (payFrequency === 'monthly') return [];
+        return expenses.filter(
+            (e) => e.selected && parseFloat(e.amount) > 0 && nextCycleBlocks.includes(e.dueBlock)
+        );
+    }, [expenses, nextCycleBlocks, payFrequency]);
+
+    // Monto total de los gastos que vencen en el ciclo entrante
+    const nextCycleTotalAmount = useMemo(() => {
+        return nextCycleExpenses.reduce((acc, item) => {
+            const val = parseFloat(item.amount);
+            return acc + (isNaN(val) ? 0 : val);
+        }, 0);
+    }, [nextCycleExpenses]);
+
+    // Solo mostrar si la frecuencia NO es mensual y hay al menos un gasto en el ciclo entrante
+    const showSyncQuestion = payFrequency !== 'monthly' && nextCycleExpenses.length > 0;
 
     const remainingAfterFixed = Math.max(0, numericIncome - totalFixed);
     const numericSaving = parseFloat(savings) || 0;
@@ -128,6 +153,15 @@ export default function SetupScreen() {
                 );
                 return;
             }
+
+            if (showSyncQuestion && hasPreSavedNextCycle === null) {
+                Alert.alert(
+                    'Sincronización requerida',
+                    'Por favor confirma si ya tienes apartado el dinero para los compromisos del inicio del ciclo.'
+                );
+                return;
+            }
+
             setStep(3);
         }
     };
@@ -168,6 +202,7 @@ export default function SetupScreen() {
                 fixedExpenses: activeExpenses,
                 savingsTarget: numericSaving,
                 leisureBudget: numericLeisure,
+                hasPreSavedNextCycle: payFrequency === 'monthly' ? true : (hasPreSavedNextCycle ?? true),
             });
 
             router.replace('/(tabs)');
@@ -462,6 +497,66 @@ export default function SetupScreen() {
                                         Total en Fijos: <Text style={styles.summaryHighlight}>${totalFixed.toFixed(2)} MXN</Text>
                                     </Text>
                                 </View>
+
+                                {/* Pregunta de Sincronización para Frecuencias no mensuales */}
+                                {showSyncQuestion && (
+                                    <View style={styles.syncCard}>
+                                        <View style={styles.syncCardHeader}>
+                                            <Ionicons name="calendar-outline" size={22} color="#38BDF8" />
+                                            <Text style={styles.syncCardTitle}>Compromisos del inicio de ciclo</Text>
+                                        </View>
+                                        <Text style={styles.syncQuestionText}>
+                                            Tienes gastos programados para el inicio del ciclo (${nextCycleTotalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}). ¿Ya tienes este dinero apartado en tu banco?
+                                        </Text>
+                                        <View style={styles.syncButtonsContainer}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.syncOptionButton,
+                                                    hasPreSavedNextCycle === true && styles.syncOptionButtonActive,
+                                                ]}
+                                                onPress={() => setHasPreSavedNextCycle(true)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons
+                                                    name={hasPreSavedNextCycle === true ? 'radio-button-on' : 'radio-button-off'}
+                                                    size={20}
+                                                    color={hasPreSavedNextCycle === true ? '#38BDF8' : '#64748B'}
+                                                />
+                                                <Text
+                                                    style={[
+                                                        styles.syncOptionText,
+                                                        hasPreSavedNextCycle === true && styles.syncOptionTextActive,
+                                                    ]}
+                                                >
+                                                    Sí, ya lo tengo apartado
+                                                </Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.syncOptionButton,
+                                                    hasPreSavedNextCycle === false && styles.syncOptionButtonActive,
+                                                ]}
+                                                onPress={() => setHasPreSavedNextCycle(false)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons
+                                                    name={hasPreSavedNextCycle === false ? 'radio-button-on' : 'radio-button-off'}
+                                                    size={20}
+                                                    color={hasPreSavedNextCycle === false ? '#38BDF8' : '#64748B'}
+                                                />
+                                                <Text
+                                                    style={[
+                                                        styles.syncOptionText,
+                                                        hasPreSavedNextCycle === false && styles.syncOptionTextActive,
+                                                    ]}
+                                                >
+                                                    No, tendré que pagarlo de este sueldo
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )}
                             </View>
                         )}
 
@@ -976,6 +1071,61 @@ const styles = StyleSheet.create({
     },
     dueBlockChipTextActive: {
         color: '#38BDF8',
+        fontWeight: '700',
+    },
+    syncCard: {
+        width: '100%',
+        backgroundColor: '#0F172A',
+        borderRadius: 16,
+        padding: 16,
+        borderWidth: 1.5,
+        borderColor: '#38BDF8',
+        marginTop: 16,
+        gap: 12,
+    },
+    syncCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    syncCardTitle: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#F8FAFC',
+    },
+    syncQuestionText: {
+        fontSize: 14,
+        color: '#CBD5E1',
+        lineHeight: 20,
+    },
+    syncButtonsContainer: {
+        flexDirection: 'column',
+        gap: 10,
+        marginTop: 4,
+    },
+    syncOptionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#161F30',
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        borderColor: '#24324D',
+        gap: 10,
+    },
+    syncOptionButtonActive: {
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    },
+    syncOptionText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#94A3B8',
+        flex: 1,
+    },
+    syncOptionTextActive: {
+        color: '#F8FAFC',
         fontWeight: '700',
     },
 });

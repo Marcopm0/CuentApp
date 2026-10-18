@@ -24,6 +24,8 @@ interface Transaction {
     category: string;
     description?: string;
     targetBucket?: 'leisure' | 'buffer' | 'savings';
+    isFixedExpense?: boolean;
+    budgetId?: string | null;
     createdAt?: any;
 }
 

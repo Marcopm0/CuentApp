@@ -30,9 +30,10 @@ export const getISOWeek = (date: Date): { year: number; week: number } => {
  */
 export const getPeriodInfo = (
     frequency: PayFrequency = 'biweekly',
-    payDayOfWeek: number = 5 // Por defecto Viernes = 5 (0: Domingo, 1: Lunes, ..., 6: Sábado)
+    payDayOfWeek: number = 5, // Por defecto Viernes = 5 (0: Domingo, 1: Lunes, ..., 6: Sábado)
+    customDate?: Date
 ): PeriodInfo => {
-    const now = new Date();
+    const now = customDate ? new Date(customDate.getTime()) : new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = now.getDate();
@@ -139,4 +140,27 @@ export const getPeriodInfo = (
         startDate: cycleStart,
         endDate: cycleEnd,
     };
+};
+
+/**
+ * Devuelve los bloques de vencimiento (DueBlock) correspondientes al ciclo entrante inmediato.
+ */
+export const getNextCycleBlocks = (
+    frequency: PayFrequency = 'biweekly',
+    payDayOfWeek: number = 5,
+    currentDate: Date = new Date()
+): DueBlock[] => {
+    if (frequency === 'monthly') {
+        return ['start', 'mid', 'end'];
+    }
+
+    const currentPeriod = getPeriodInfo(frequency, payDayOfWeek, currentDate);
+    if (!currentPeriod.endDate) {
+        return ['start'];
+    }
+
+    // 12 horas después de finalizar el ciclo actual para posicionarse en el siguiente ciclo
+    const nextCycleDate = new Date(currentPeriod.endDate.getTime() + 1000 * 60 * 60 * 12);
+    const nextPeriod = getPeriodInfo(frequency, payDayOfWeek, nextCycleDate);
+    return nextPeriod.activeBlocks;
 };

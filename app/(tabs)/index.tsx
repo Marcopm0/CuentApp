@@ -1,6 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
 import { auth, db } from '@/services/firebase';
-import { DueBlock, getPeriodInfo, PayFrequency } from '@/utils/periods';
+import { DueBlock, getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
@@ -22,6 +22,8 @@ interface Transaction {
   type: 'income' | 'expense';
   amount: number;
   category: string;
+  isFixedExpense?: boolean;
+  budgetId?: string | null;
   createdAt?: any;
   targetBucket?: 'leisure' | 'buffer' | 'savings';
 }
@@ -37,6 +39,11 @@ export default function HomeScreen() {
   const [payDayOfWeek, setPayDayOfWeek] = useState<number>(5);
   const [amountPerPeriod, setAmountPerPeriod] = useState<number>(0);
   const [isAbonando, setIsAbonando] = useState<boolean>(false);
+  const [userProfile, setUserProfile] = useState<{
+    hasPreSavedNextCycle?: boolean;
+    firstPeriodKey?: string;
+    createdAt?: any;
+  }>({ hasPreSavedNextCycle: true });
 
   //Para el registro de gastos
   const ultimosMovimientos = useMemo(() => {
@@ -104,6 +111,13 @@ export default function HomeScreen() {
                 : ingresoTotal;
 
           setAmountPerPeriod(periodAmount);
+
+          // Estado del perfil para cálculo de apartado de próximo ciclo
+          setUserProfile({
+            hasPreSavedNextCycle: data.hasPreSavedNextCycle !== undefined ? data.hasPreSavedNextCycle : true,
+            firstPeriodKey: data.firstPeriodKey,
+            createdAt: data.createdAt,
+          });
         }
       } catch (error) {
         console.error('Error al leer los datos del usuario:', error);
@@ -154,6 +168,25 @@ export default function HomeScreen() {
   );
 
   // ─────────────────────────────────────────────────────────────
+  // DETERMINAR SI ES EL PRIMER CICLO DEL USUARIO
+  // ─────────────────────────────────────────────────────────────
+  const isFirstCycle = useMemo(() => {
+    if (userProfile.firstPeriodKey) {
+      return userProfile.firstPeriodKey === periodInfo.periodKey;
+    }
+    if (userProfile.createdAt && periodInfo.startDate && periodInfo.endDate) {
+      const createdMs = userProfile.createdAt?.toMillis
+        ? userProfile.createdAt.toMillis()
+        : (userProfile.createdAt?.seconds ? userProfile.createdAt.seconds * 1000 : null);
+      if (createdMs) {
+        const d = new Date(createdMs);
+        return d >= periodInfo.startDate && d <= periodInfo.endDate;
+      }
+    }
+    return false;
+  }, [userProfile, periodInfo]);
+
+  // ─────────────────────────────────────────────────────────────
   // CÁLCULO DEL DISPONIBLE POR PERIODO Y FLUJO DE EFECTIVO REAL
   // ─────────────────────────────────────────────────────────────
   const {
@@ -173,10 +206,23 @@ export default function HomeScreen() {
     // 1. Divisor proporcional para apartados mensuales según periodicidad
     const divisor = payFrequency === 'weekly' ? 4 : payFrequency === 'biweekly' ? 2 : 1;
 
-    // 2. Gastos fijos que vencen en este periodo según activeBlocks (start: 1-10, mid: 11-20, end: 21-31)
-    const fijosDelPeriodo = budgets
-      .filter((b) => b.isFixedExpense && b.dueBlock && periodInfo.activeBlocks.includes(b.dueBlock))
-      .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+    // 2. Gastos fijos del periodo
+    let fijosDelPeriodo = 0;
+    if (userProfile.hasPreSavedNextCycle === false && isFirstCycle) {
+      // Retener del ingreso de este ciclo los gastos que vencen en el ciclo entrante más los del ciclo activo
+      const nextCycleBlocks = getNextCycleBlocks(payFrequency, payDayOfWeek);
+      const relevantBlocks = new Set([...periodInfo.activeBlocks, ...nextCycleBlocks]);
+      fijosDelPeriodo = budgets
+        .filter((b) => b.isFixedExpense && b.dueBlock && relevantBlocks.has(b.dueBlock))
+        .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+    } else {
+      // En ciclo normal o si hasPreSavedNextCycle === true: Aplicar el prorrateo parejo estándar
+      const totalFijosMensuales = budgets
+        .filter((b) => b.isFixedExpense)
+        .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+
+      fijosDelPeriodo = totalFijosMensuales / divisor; // divisor: weekly=4, biweekly=2, monthly=1
+    }
 
     // 3. Cuota proporcional de ahorro
     const cuotaAhorro = (savingsTarget || 0) / divisor;
@@ -224,9 +270,11 @@ export default function HomeScreen() {
     const effectiveBufferInitial = periodBuffer + extraColchon;
     const userHasBuffer = effectiveBufferInitial > 0;
 
-    // 8. Gastos variables del periodo (excluyendo fijos ya descontados de la nómina)
-    const gastosVariablesDelPeriodo = transactions
-      .filter((t) => t.type === 'expense' && t.category !== 'Gasto Fijo' && isTxInCurrentPeriod(t))
+    // 8. Gastos variables del periodo (filtrar únicamente las transacciones que NO sean de gasto fijo)
+    const transaccionesVariables = transactions.filter(
+      (t) => t.type === 'expense' && !t.isFixedExpense && t.category !== 'Gasto Fijo' && isTxInCurrentPeriod(t)
+    );
+    const gastosVariablesDelPeriodo = transaccionesVariables
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
     // 9. Disponible real del periodo que refleja fielmente la liquidez
@@ -303,7 +351,40 @@ export default function HomeScreen() {
       progressPercentage: progress,
       mensajePie: pie,
     };
-  }, [budgets, transactions, payFrequency, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear]);
+  }, [budgets, transactions, payFrequency, payDayOfWeek, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear, userProfile, isFirstCycle]);
+
+  // ─────────────────────────────────────────────────────────────
+  // COMPROMISOS Y GASTOS FIJOS (TARJETA DE SEGUIMIENTO MENSUAL)
+  // ─────────────────────────────────────────────────────────────
+  const presupuestosFijos = useMemo(() => {
+    return budgets.filter((b) => b.isFixedExpense);
+  }, [budgets]);
+
+  const totalFijosMes = useMemo(() => {
+    return presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+  }, [presupuestosFijos]);
+
+  const totalPagado = useMemo(() => {
+    return presupuestosFijos.reduce((acc, b) => acc + (Number(b.currentSpent) || 0), 0);
+  }, [presupuestosFijos]);
+
+  const progresoFijos = useMemo(() => {
+    if (totalFijosMes <= 0) return 0;
+    return Math.min(100, (totalPagado / totalFijosMes) * 100);
+  }, [totalPagado, totalFijosMes]);
+
+  const getDueBlockLabel = (block?: DueBlock) => {
+    switch (block) {
+      case 'start':
+        return '1-10 (Principio)';
+      case 'mid':
+        return '11-20 (Mediados)';
+      case 'end':
+        return '21-31 (Fin)';
+      default:
+        return '1-31 (Mes)';
+    }
+  };
 
   // ─────────────────────────────────────────────────────────────
   // VALIDACIÓN Y ACCIÓN DE ABONO DE NÓMINA CON GESTIÓN DE SOBRANTE
@@ -587,6 +668,76 @@ export default function HomeScreen() {
           </ThemedText>
         </View>
 
+        {/************************* Compromisos y Gastos Fijos ****************************/}
+        <View style={styles.fixedCard}>
+          <View style={styles.fixedCardHeader}>
+            <View style={styles.fixedTitleRow}>
+              <ThemedText style={styles.widgetlabel}>Compromisos y Gastos Fijos</ThemedText>
+            </View>
+            <ThemedText style={styles.fixedCardSummary}>
+              ${totalPagado.toLocaleString('es-MX', { minimumFractionDigits: 2 })} / ${totalFijosMes.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+            </ThemedText>
+          </View>
+
+          {/* Barra de progreso visual */}
+          <View style={styles.trackBar}>
+            <View
+              style={[
+                styles.fillBar,
+                {
+                  width: `${progresoFijos}%`,
+                  backgroundColor: progresoFijos >= 100 ? '#10B981' : '#38BDF8',
+                },
+              ]}
+            />
+          </View>
+
+          {/* Lista de elementos fijos */}
+          {presupuestosFijos.length === 0 ? (
+            <ThemedText style={styles.emptyStateText}>
+              No hay compromisos fijos registrados este mes.
+            </ThemedText>
+          ) : (
+            <View style={styles.fixedListContainer}>
+              {presupuestosFijos.map((b) => {
+                const pagado = (Number(b.currentSpent) || 0) >= Number(b.limitAmount);
+                return (
+                  <View key={b.id} style={styles.fixedItemRow}>
+                    <View style={styles.fixedItemLeft}>
+                      <ThemedText style={styles.fixedItemName} numberOfLines={1}>
+                        {b.category}
+                      </ThemedText>
+                      <ThemedText style={styles.fixedItemBlock}>
+                        {getDueBlockLabel(b.dueBlock)}
+                      </ThemedText>
+                    </View>
+
+                    <View style={styles.fixedItemRight}>
+                      <ThemedText style={styles.fixedItemAmount}>
+                        ${Number(b.limitAmount).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                      </ThemedText>
+                      <View
+                        style={[
+                          styles.fixedStatusBadge,
+                          pagado ? styles.fixedStatusPaidBadge : styles.fixedStatusPendingBadge,
+                        ]}
+                      >
+                        <ThemedText
+                          style={[
+                            styles.fixedStatusBadgeText,
+                            pagado ? styles.fixedStatusPaidText : styles.fixedStatusPendingText,
+                          ]}
+                        >
+                          {pagado ? '✅ Pagado' : '⏳ Pendiente'}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
 
         {/*************************Registro de gastos****************************/}
         <View style={styles.widget}>
@@ -961,5 +1112,92 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  // Tarjeta de Compromisos y Gastos Fijos
+  fixedCard: {
+    width: '90%',
+    backgroundColor: '#161F30',
+    borderRadius: 24,
+    padding: 20,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: '#24324D',
+  },
+  fixedCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fixedTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  fixedCardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F8FAFC',
+  },
+  fixedCardSummary: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#38BDF8',
+  },
+  fixedListContainer: {
+    gap: 10,
+    marginTop: 4,
+  },
+  fixedItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(36, 50, 77, 0.4)',
+  },
+  fixedItemLeft: {
+    flex: 1,
+    marginRight: 10,
+    gap: 2,
+  },
+  fixedItemName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F1F5F9',
+  },
+  fixedItemBlock: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  fixedItemRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  fixedItemAmount: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F8FAFC',
+  },
+  fixedStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  fixedStatusPaidBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  fixedStatusPendingBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+  },
+  fixedStatusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  fixedStatusPaidText: {
+    color: '#10B981',
+  },
+  fixedStatusPendingText: {
+    color: '#F59E0B',
   },
 });

@@ -23,6 +23,7 @@ export interface OnboardingPayload {
     fixedExpenses: FixedExpense[];
     savingsTarget: number;
     leisureBudget: number;
+    hasPreSavedNextCycle?: boolean;
 }
 
 // Función auxiliar para normalizar nombres en IDs de Firestore (sin acentos ni espacios)
@@ -115,6 +116,8 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
         payFrequency: data.payFrequency,
         amountPerPeriod: data.amountPerPeriod,
         savingsTarget: data.savingsTarget,
+        hasPreSavedNextCycle: data.payFrequency === 'monthly' ? true : (data.hasPreSavedNextCycle ?? true),
+        firstPeriodKey: currentPeriod.periodKey,
         habitualFixedExpenses: data.fixedExpenses.map((expense) => ({
             name: expense.name,
             defaultAmount: expense.amount,

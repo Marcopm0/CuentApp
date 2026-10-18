@@ -1,7 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { useMemo, useState } from 'react';
+import {
+    addDoc,
+    collection,
+    doc,
+    getDocs,
+    increment,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where,
+} from 'firebase/firestore';
+import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -9,6 +19,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    ScrollView,
     StyleSheet,
     Switch,
     Text,
@@ -21,12 +32,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { auth, db } from '@/services/firebase';
 
-const CATEGORIAS_GASTO = [
+interface Budget {
+    id: string;
+    category: string;
+    limitAmount: number;
+    currentSpent: number;
+    isFixedExpense: boolean;
+    dueBlock?: string;
+}
+
+const CATEGORIAS_GASTO_VARIABLES = [
     '🍿 Ocio',
     '🌮 Comida / Antojos',
     '🛒 Despensa',
     '🚌 Transporte',
-    '💡 Servicios / Fijos',
     '💊 Salud',
     '📦 Otro Gasto',
 ];
@@ -50,6 +69,10 @@ export default function AgregarRegistroScreen() {
     const [modalCategoryVisible, setModalCategoryVisible] = useState<boolean>(false);
     const [loading, setLoading] = useState<boolean>(false);
 
+    // Presupuestos activos para el mes actual y selección de presupuesto fijo
+    const [budgets, setBudgets] = useState<Budget[]>([]);
+    const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+
     // Destino del ingreso cuando entra dinero extra
     const [targetBucket, setTargetBucket] = useState<'leisure' | 'buffer' | 'savings'>('leisure');
 
@@ -59,10 +82,37 @@ export default function AgregarRegistroScreen() {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }, []);
 
+    // Cargar presupuestos activos de Firestore para el monthYear actual
+    useEffect(() => {
+        const user = auth.currentUser;
+        if (!user) return;
+
+        const fetchBudgets = async () => {
+            try {
+                const q = query(
+                    collection(db, 'budgets'),
+                    where('userId', '==', user.uid),
+                    where('monthYear', '==', currentMonthYear)
+                );
+                const snapshot = await getDocs(q);
+                const docs: Budget[] = snapshot.docs.map((d) => ({
+                    id: d.id,
+                    ...(d.data() as Omit<Budget, 'id'>),
+                }));
+                setBudgets(docs);
+            } catch (error) {
+                console.error('Error al cargar presupuestos activos:', error);
+            }
+        };
+
+        fetchBudgets();
+    }, [currentMonthYear]);
+
     const handleToggleType = () => {
         const nextType = !isExpense;
         setIsExpense(nextType);
-        setCategory(nextType ? CATEGORIAS_GASTO[0] : CATEGORIAS_INGRESO[0]);
+        setSelectedBudget(null);
+        setCategory(nextType ? CATEGORIAS_GASTO_VARIABLES[0] : CATEGORIAS_INGRESO[0]);
     };
 
     const handleSave = async () => {
@@ -82,12 +132,18 @@ export default function AgregarRegistroScreen() {
         setLoading(true);
 
         try {
+            // Detectar si la categoría seleccionada corresponde a un presupuesto fijo
+            const isFixed = isExpense && selectedBudget !== null && selectedBudget.isFixedExpense === true;
+            const targetBudgetId = isFixed && selectedBudget ? selectedBudget.id : null;
+
             await addDoc(collection(db, 'transactions'), {
                 userId: user.uid,
                 type: isExpense ? 'expense' : 'income',
                 amount: numericAmount,
-                description: description.trim() || (isExpense ? 'Gasto registrado' : 'Ingreso extra'),
+                description: description.trim() || (isExpense ? (isFixed ? `Gasto fijo: ${category}` : 'Gasto registrado') : 'Ingreso extra'),
                 category,
+                isFixedExpense: isFixed,
+                budgetId: targetBudgetId,
                 // Si es ingreso guardamos la bolsa elegida; si es gasto es null
                 targetBucket: isExpense ? null : targetBucket,
                 isShared: false,
@@ -96,9 +152,19 @@ export default function AgregarRegistroScreen() {
                 createdAt: serverTimestamp(),
             });
 
+            // Si es un gasto fijo, actualizar currentSpent en el presupuesto correspondiente
+            if (isFixed && targetBudgetId) {
+                const budgetRef = doc(db, 'budgets', targetBudgetId);
+                await updateDoc(budgetRef, {
+                    currentSpent: increment(numericAmount),
+                    updatedAt: serverTimestamp(),
+                });
+            }
+
             Alert.alert('Guardado', `${isExpense ? 'Gasto' : 'Ingreso'} registrado con éxito.`);
             setAmount('');
             setDescription('');
+            setSelectedBudget(null);
 
             if (router.canGoBack()) {
                 router.back();
@@ -110,8 +176,6 @@ export default function AgregarRegistroScreen() {
             setLoading(false);
         }
     };
-
-    const currentCategoryList = isExpense ? CATEGORIAS_GASTO : CATEGORIAS_INGRESO;
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -313,30 +377,126 @@ export default function AgregarRegistroScreen() {
                             activeOpacity={1}
                             onPress={() => setModalCategoryVisible(false)}
                         >
-                            <View style={styles.modalContent}>
+                            <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
                                 <Text style={styles.modalTitle}>Selecciona una Categoría</Text>
-                                {currentCategoryList.map((cat) => (
-                                    <TouchableOpacity
-                                        key={cat}
-                                        style={[
-                                            styles.categoryItem,
-                                            category === cat && styles.categoryItemActive,
-                                        ]}
-                                        onPress={() => {
-                                            setCategory(cat);
-                                            setModalCategoryVisible(false);
-                                        }}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.categoryItemText,
-                                                category === cat && styles.categoryItemTextActive,
-                                            ]}
-                                        >
-                                            {cat}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
+                                <ScrollView
+                                    style={styles.modalScrollView}
+                                    showsVerticalScrollIndicator={false}
+                                >
+                                    {isExpense ? (
+                                        <>
+                                            <Text style={styles.modalSectionLabel}>Gastos Variables</Text>
+                                            {CATEGORIAS_GASTO_VARIABLES.map((cat) => {
+                                                const isSelected = selectedBudget === null && category === cat;
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={cat}
+                                                        style={[
+                                                            styles.categoryItem,
+                                                            isSelected && styles.categoryItemActive,
+                                                        ]}
+                                                        onPress={() => {
+                                                            setCategory(cat);
+                                                            setSelectedBudget(null);
+                                                            setModalCategoryVisible(false);
+                                                        }}
+                                                    >
+                                                        <Text
+                                                            style={[
+                                                                styles.categoryItemText,
+                                                                isSelected && styles.categoryItemTextActive,
+                                                            ]}
+                                                        >
+                                                            {cat}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+
+                                            {budgets.filter((b) => b.isFixedExpense).length > 0 && (
+                                                <>
+                                                    <Text style={styles.modalSectionLabel}>Gastos Fijos Programados</Text>
+                                                    {budgets
+                                                        .filter((b) => b.isFixedExpense)
+                                                        .map((b) => {
+                                                            const isSelected = selectedBudget?.id === b.id;
+                                                            const blockText = b.dueBlock === 'start'
+                                                                ? '1-10 (Principio)'
+                                                                : b.dueBlock === 'mid'
+                                                                    ? '11-20 (Mediados)'
+                                                                    : b.dueBlock === 'end'
+                                                                        ? '21-31 (Fin)'
+                                                                        : 'Mes';
+                                                            return (
+                                                                <TouchableOpacity
+                                                                    key={b.id}
+                                                                    style={[
+                                                                        styles.categoryItem,
+                                                                        isSelected && styles.categoryItemActive,
+                                                                    ]}
+                                                                    onPress={() => {
+                                                                        setCategory(b.category);
+                                                                        setSelectedBudget(b);
+                                                                        setModalCategoryVisible(false);
+                                                                    }}
+                                                                >
+                                                                    <View style={styles.fixedCategoryRow}>
+                                                                        <View style={{ flex: 1, marginRight: 8 }}>
+                                                                            <Text
+                                                                                style={[
+                                                                                    styles.categoryItemText,
+                                                                                    isSelected && styles.categoryItemTextActive,
+                                                                                ]}
+                                                                                numberOfLines={1}
+                                                                            >
+                                                                                {b.category}
+                                                                            </Text>
+                                                                            <Text style={styles.fixedCategoryMeta}>
+                                                                                Bloque: {blockText}
+                                                                            </Text>
+                                                                        </View>
+                                                                        <Text style={styles.fixedCategoryAmount}>
+                                                                            ${Number(b.limitAmount).toLocaleString('es-MX', { minimumFractionDigits: 0 })}
+                                                                        </Text>
+                                                                    </View>
+                                                                </TouchableOpacity>
+                                                            );
+                                                        })}
+                                                </>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Text style={styles.modalSectionLabel}>Ingresos Extra</Text>
+                                            {CATEGORIAS_INGRESO.map((cat) => {
+                                                const isSelected = category === cat;
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={cat}
+                                                        style={[
+                                                            styles.categoryItem,
+                                                            isSelected && styles.categoryItemActive,
+                                                        ]}
+                                                        onPress={() => {
+                                                            setCategory(cat);
+                                                            setSelectedBudget(null);
+                                                            setModalCategoryVisible(false);
+                                                        }}
+                                                    >
+                                                        <Text
+                                                            style={[
+                                                                styles.categoryItemText,
+                                                                isSelected && styles.categoryItemTextActive,
+                                                            ]}
+                                                        >
+                                                            {cat}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </>
+                                    )}
+                                </ScrollView>
                             </View>
                         </TouchableOpacity>
                     </Modal>
@@ -577,5 +737,33 @@ const styles = StyleSheet.create({
     categoryItemTextActive: {
         color: '#38BDF8',
         fontWeight: '800',
+    },
+    modalScrollView: {
+        maxHeight: 380,
+        width: '100%',
+    },
+    modalSectionLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#38BDF8',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginTop: 10,
+        marginBottom: 6,
+    },
+    fixedCategoryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    fixedCategoryMeta: {
+        fontSize: 11,
+        color: '#64748B',
+        marginTop: 2,
+    },
+    fixedCategoryAmount: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#38BDF8',
     },
 });
