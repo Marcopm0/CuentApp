@@ -1,4 +1,5 @@
 import { ThemedText } from '@/components/themed-text';
+import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
 import { Budget, Transaction } from '@/types/database';
 import { deduplicateBudgets } from '@/utils/budgets';
@@ -293,26 +294,26 @@ export default function HomeScreen() {
     const isBufferActiveHealthy = !isBufferCritical && !isBufferWarning && userHasBuffer && totalConsumoBuffer > 0 && bufferPctRemaining >= 25 && !hasOcioDeficit;
 
     // 11. Semáforo dinámico
-    let color = '#10B981';
+    let color: string = Theme.colors.statusSuccess;
     let label = '• Ritmo Saludable';
     let progress = 0;
     let pie = '';
 
     if (userHasBuffer) {
       if (isBufferCritical) {
-        color = '#EF4444';
+        color = Theme.colors.statusDanger;
         label = overdrawn ? '🔴 Sobregirado' : '🔴 En Peligro';
         progress = Math.min(100, (totalConsumoBuffer / effectiveBufferInitial) * 100);
         pie = overdrawn
           ? `¡Cuidado! Te pasaste por $${(totalConsumoBuffer - effectiveBufferInitial).toFixed(2)} de tu colchón.`
           : `Alerta: Reserva crítica (${bufferPctRemaining.toFixed(0)}% restante). Modera tus salidas de dinero.`;
       } else if (isBufferWarning) {
-        color = '#F59E0B';
+        color = Theme.colors.statusWarning;
         label = 'Precaución';
         progress = Math.min(100, (totalConsumoBuffer / effectiveBufferInitial) * 100);
         pie = `Has consumido el ${(100 - bufferPctRemaining).toFixed(0)}% de tu reserva. Te quedan $${bRemaining.toFixed(2)}.`;
       } else if (isBufferActiveHealthy) {
-        color = '#10B981';
+        color = Theme.colors.statusSuccess;
         label = '🛡️ Reserva Activa';
         progress = Math.min(100, (totalConsumoBuffer / effectiveBufferInitial) * 100);
         pie = `Uso previsto de reserva: saldo saludable ($${bRemaining.toFixed(2)} restantes en colchón).`;
@@ -321,11 +322,11 @@ export default function HomeScreen() {
         const pct = effectiveLeisureLimit > 0 ? (gastosOcio / effectiveLeisureLimit) * 100 : 0;
         progress = Math.min(100, pct);
         if (pct > 65) {
-          color = '#F59E0B';
+          color = Theme.colors.statusWarning;
           label = 'Precaución';
           pie = `Has gastado el ${pct.toFixed(0)}% de tu ocio. Te quedan $${lRemaining.toFixed(2)}.`;
         } else {
-          color = '#10B981';
+          color = Theme.colors.statusSuccess;
           label = '• Ritmo Saludable';
           pie = `Ritmo saludable: te quedan $${lRemaining.toFixed(2)} para gastar en ocio.`;
         }
@@ -334,15 +335,15 @@ export default function HomeScreen() {
       const pct = effectiveLeisureLimit > 0 ? (gastosOcio / effectiveLeisureLimit) * 100 : 0;
       progress = Math.min(100, pct);
       if (overdrawn) {
-        color = '#EF4444';
+        color = Theme.colors.statusDanger;
         label = 'Sobregirado';
         pie = `Te has pasado de tu dinero asignado por $${(gastosVariablesDelPeriodo - effectiveLeisureLimit).toFixed(2)}.`;
       } else if (pct > 70) {
-        color = '#F59E0B';
+        color = Theme.colors.statusWarning;
         label = 'Precaución';
         pie = `Has gastado el ${pct.toFixed(0)}% de tu dinero libre.`;
       } else {
-        color = '#10B981';
+        color = Theme.colors.statusSuccess;
         label = 'Bajo Control';
         pie = `Todo en orden: llevas el ${pct.toFixed(0)}% de tu dinero libre consumido.`;
       }
@@ -537,7 +538,7 @@ export default function HomeScreen() {
                   activeOpacity={0.8}
                 >
                   {isAbonando ? (
-                    <ActivityIndicator size="small" color="#0B0F17" />
+                    <ActivityIndicator size="small" color={Theme.colors.background} />
                   ) : (
                     <ThemedText style={styles.bannerBtnText}>Abonar</ThemedText>
                   )}
@@ -549,7 +550,7 @@ export default function HomeScreen() {
               <View style={styles.bannerSobranteSection}>
                 <View style={styles.bannerSobranteDivider} />
                 <View style={styles.bannerSobranteBadge}>
-                  <Ionicons name="sparkles" size={15} color="#34D399" />
+                  <Ionicons name="sparkles" size={15} color={Theme.colors.income} />
                   <ThemedText style={styles.bannerSobranteText}>
                     Sobrante a favor del ciclo anterior:{' '}
                     <ThemedText style={styles.bannerSobranteHighlight}>
@@ -569,10 +570,10 @@ export default function HomeScreen() {
                     activeOpacity={0.8}
                   >
                     {isAbonando ? (
-                      <ActivityIndicator size="small" color="#0B0F17" />
+                      <ActivityIndicator size="small" color={Theme.colors.background} />
                     ) : (
                       <>
-                        <Ionicons name="save-outline" size={16} color="#0B0F17" />
+                        <Ionicons name="save-outline" size={16} color={Theme.colors.background} />
                         <ThemedText style={styles.bannerChoiceBtnText}>
                           Mandar a Ahorro
                         </ThemedText>
@@ -587,10 +588,10 @@ export default function HomeScreen() {
                     activeOpacity={0.8}
                   >
                     {isAbonando ? (
-                      <ActivityIndicator size="small" color="#0B0F17" />
+                      <ActivityIndicator size="small" color={Theme.colors.background} />
                     ) : (
                       <>
-                        <Ionicons name="shield-checkmark-outline" size={16} color="#0B0F17" />
+                        <Ionicons name="shield-checkmark-outline" size={16} color={Theme.colors.background} />
                         <ThemedText style={styles.bannerChoiceBtnText}>
                           Colchón Extra
                         </ThemedText>
@@ -627,7 +628,7 @@ export default function HomeScreen() {
           <ThemedText
             style={[
               styles.widgetAmount,
-              (isBufferCritical || isOverdrawn) && { color: '#EF4444' },
+              (isBufferCritical || isOverdrawn) && { color: Theme.colors.statusDanger },
             ]}
           >
             ${totalAvailable.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
@@ -749,7 +750,7 @@ export default function HomeScreen() {
                 styles.fillBar,
                 {
                   width: `${progresoFijos}%`,
-                  backgroundColor: progresoFijos >= 100 ? '#10B981' : '#38BDF8',
+                  backgroundColor: progresoFijos >= 100 ? Theme.colors.statusSuccess : Theme.colors.fixed,
                 },
               ]}
             />
@@ -851,7 +852,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0B0F17',
+    backgroundColor: Theme.colors.background,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -859,7 +860,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingTop: 25,
     gap: 16,
-    backgroundColor: '#0B0F17',
+    backgroundColor: Theme.colors.background,
   },
   headerRow: {
     flexDirection: 'row',
@@ -871,47 +872,44 @@ const styles = StyleSheet.create({
   saludo: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
     alignSelf: 'flex-start',
     marginLeft: '7%',
   },
   miniwigdet: {
-    backgroundColor: '#161F30',
-    borderRadius: 20,
+    backgroundColor: Theme.colors.cardSurface,
+    borderRadius: Theme.radius.xl,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#24324D',
+    borderColor: Theme.colors.border,
   },
   miniwigdettext: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
     alignSelf: 'flex-start',
   },
   widget: {
     width: '90%',
-    backgroundColor: '#161F30',
-    borderRadius: 16,
+    backgroundColor: Theme.colors.cardSurface,
+    borderRadius: Theme.radius.lg,
     padding: 20,
     gap: 6,
-
-
-    //borde
     borderWidth: 1,
-    borderColor: '#24324D',
+    borderColor: Theme.colors.border,
   },
   widgetlabel: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
     alignSelf: 'flex-start',
     marginLeft: '5%',
   },
   widgetAmount: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#ffffffff',
+    color: Theme.colors.textPrimary,
     alignSelf: 'flex-start',
     marginLeft: '10%',
   },
@@ -919,11 +917,11 @@ const styles = StyleSheet.create({
   //tarjeta de gastos
   widgetWarning: {
     borderColor: 'rgba(245, 158, 11, 0.5)',
-    backgroundColor: '#1C1E2A',
+    backgroundColor: Theme.colors.cardSurface,
   },
   widgetDanger: {
     borderColor: 'rgba(239, 68, 68, 0.5)',
-    backgroundColor: '#20161C',
+    backgroundColor: Theme.colors.cardSurface,
   },
   widgetHeader: {
     flexDirection: 'row',
@@ -933,28 +931,27 @@ const styles = StyleSheet.create({
   statusBadgeWarning: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#F59E0B',
+    color: Theme.colors.statusWarning,
   },
   statusBadgeDanger: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#EF4444',
+    color: Theme.colors.statusDanger,
   },
   statusBadgeHealthy: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#10B981',
+    color: Theme.colors.statusSuccess,
   },
   currencyCode: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#64748B',
+    color: Theme.colors.textMuted,
   },
-
 
   emptyStateText: {
     fontSize: 13,
-    color: '#64748B',
+    color: Theme.colors.textMuted,
     fontStyle: 'italic',
     marginVertical: 8,
   },
@@ -969,22 +966,22 @@ const styles = StyleSheet.create({
   },
   movimientoDesc: {
     fontSize: 15,
-    fontWeight: 700,
-    color: '#94A3B8',
+    fontWeight: '700',
+    color: Theme.colors.textPrimary,
   },
   movimientoCat: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
   },
   movimientoMonto: {
     fontSize: 15,
     fontWeight: '800',
   },
   montoGasto: {
-    color: '#F87171', // Rojo suave
+    color: Theme.colors.expense,
   },
   montoIngreso: {
-    color: '#34D399', // Verde esmeralda
+    color: Theme.colors.income,
   },
   movimientoRow: {
     flexDirection: 'row',
@@ -992,7 +989,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: Theme.colors.borderSubtle,
   },
   // Estilos del Semáforo
   statusBadge: {
@@ -1000,7 +997,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: Theme.radius.md,
     gap: 6,
   },
   statusDot: {
@@ -1025,59 +1022,59 @@ const styles = StyleSheet.create({
   bucketTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
   },
   bucketValue: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: Theme.colors.textPrimary,
   },
   bucketLimitText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#64748B',
+    color: Theme.colors.textMuted,
   },
   bucketValueMuted: {
-    color: '#64748B',
+    color: Theme.colors.textMuted,
   },
   bucketValueSafe: {
-    color: '#38BDF8',
+    color: Theme.colors.buffer,
   },
   bucketValueWarning: {
-    color: '#F59E0B',
+    color: Theme.colors.statusWarning,
   },
   bucketValueDanger: {
-    color: '#EF4444',
+    color: Theme.colors.statusDanger,
   },
   assignedBadge: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#10B981',
+    color: Theme.colors.statusSuccess,
     marginTop: 2,
   },
   trackBar: {
     height: 8,
-    backgroundColor: '#0B0F17',
-    borderRadius: 4,
+    backgroundColor: Theme.colors.cardSurfaceSubtle,
+    borderRadius: Theme.radius.xs,
     overflow: 'hidden',
     marginTop: 6,
   },
   fillBar: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: Theme.radius.xs,
   },
   semaphoreFootnote: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
     marginTop: 2,
   },
   bannerCobro: {
     width: '90%',
-    backgroundColor: '#161F30',
-    borderRadius: 16,
+    backgroundColor: Theme.colors.cardSurface,
+    borderRadius: Theme.radius.lg,
     padding: 16,
     borderWidth: 1.5,
-    borderColor: '#10B981',
+    borderColor: Theme.colors.income,
     gap: 12,
   },
   bannerHeaderRow: {
@@ -1093,24 +1090,24 @@ const styles = StyleSheet.create({
   bannerTitulo: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#10B981',
+    color: Theme.colors.income,
     textTransform: 'uppercase',
   },
   bannerMonto: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: Theme.colors.textPrimary,
   },
   bannerBtn: {
-    backgroundColor: '#10B981',
+    backgroundColor: Theme.colors.income,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: Theme.radius.md,
   },
   bannerBtnText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#0B0F17',
+    color: Theme.colors.background,
   },
   bannerSobranteSection: {
     width: '100%',
@@ -1128,21 +1125,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52, 211, 153, 0.12)',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: Theme.radius.sm,
   },
   bannerSobranteText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
     flex: 1,
   },
   bannerSobranteHighlight: {
-    color: '#34D399',
+    color: Theme.colors.income,
     fontWeight: '700',
   },
   bannerSobrantePregunta: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#E2E8F0',
+    color: Theme.colors.textPrimary,
   },
   bannerSobranteActions: {
     flexDirection: 'row',
@@ -1151,10 +1148,10 @@ const styles = StyleSheet.create({
   },
   bannerChoiceBtnSavings: {
     flex: 1,
-    backgroundColor: '#38BDF8',
+    backgroundColor: Theme.colors.savings,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    borderRadius: 10,
+    borderRadius: Theme.radius.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1162,10 +1159,10 @@ const styles = StyleSheet.create({
   },
   bannerChoiceBtnBuffer: {
     flex: 1,
-    backgroundColor: '#34D399',
+    backgroundColor: Theme.colors.buffer,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    borderRadius: 10,
+    borderRadius: Theme.radius.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1174,7 +1171,7 @@ const styles = StyleSheet.create({
   bannerChoiceBtnText: {
     fontSize: 12,
     fontWeight: '800',
-    color: '#0B0F17',
+    color: Theme.colors.background,
   },
   buttonDisabled: {
     opacity: 0.5,
@@ -1182,12 +1179,12 @@ const styles = StyleSheet.create({
   // Tarjeta de Compromisos y Gastos Fijos
   fixedCard: {
     width: '90%',
-    backgroundColor: '#161F30',
-    borderRadius: 24,
+    backgroundColor: Theme.colors.cardSurface,
+    borderRadius: Theme.radius.xl,
     padding: 20,
     gap: 14,
     borderWidth: 1,
-    borderColor: '#24324D',
+    borderColor: Theme.colors.border,
   },
   fixedCardHeader: {
     flexDirection: 'row',
@@ -1204,7 +1201,7 @@ const styles = StyleSheet.create({
   fixedCardSummary: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#38BDF8',
+    color: Theme.colors.fixed,
   },
   fixedListContainer: {
     gap: 10,
@@ -1216,7 +1213,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(36, 50, 77, 0.4)',
+    borderBottomColor: Theme.colors.borderSubtle,
   },
   fixedItemLeft: {
     flex: 1,
@@ -1226,11 +1223,11 @@ const styles = StyleSheet.create({
   fixedItemName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#F1F5F9',
+    color: Theme.colors.textPrimary,
   },
   fixedItemBlock: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: Theme.colors.textSecondary,
   },
   fixedItemRight: {
     alignItems: 'flex-end',
@@ -1239,12 +1236,12 @@ const styles = StyleSheet.create({
   fixedItemAmount: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#F8FAFC',
+    color: Theme.colors.textPrimary,
   },
   fixedStatusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: Theme.radius.sm,
   },
   fixedStatusPaidBadge: {
     backgroundColor: 'rgba(16, 185, 129, 0.15)',
@@ -1257,9 +1254,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   fixedStatusPaidText: {
-    color: '#10B981',
+    color: Theme.colors.statusSuccess,
   },
   fixedStatusPendingText: {
-    color: '#F59E0B',
+    color: Theme.colors.statusWarning,
   },
-});
+});

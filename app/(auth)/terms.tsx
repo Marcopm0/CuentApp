@@ -11,6 +11,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Theme } from '@/constants/theme';
 
 export default function TermsScreen() {
     const router = useRouter();
@@ -69,7 +70,7 @@ export default function TermsScreen() {
                     onPress={() => router.back()}
                     activeOpacity={0.7}
                 >
-                    <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                    <Ionicons name="arrow-back" size={24} color={Theme.colors.textPrimary} />
                 </TouchableOpacity>
 
                 {/*gatillo secreto: 5 toques seguidos en CuentApp*/}
@@ -137,7 +138,7 @@ export default function TermsScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     topBar: {
         flexDirection: 'row',
@@ -146,17 +147,17 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#24324D',
+        borderBottomColor: Theme.colors.border,
     },
     backButton: {
         width: 40,
         height: 40,
         borderRadius: 10,
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     titleContainer: {
         alignItems: 'center',
@@ -165,13 +166,13 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
     },
     topBarTitle: {
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 25,
         fontWeight: '800',
         letterSpacing: 0.5,
     },
     topBarTitleActive: {
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         textShadowColor: 'rgba(56, 189, 248, 0.75)',
         textShadowOffset: { width: 0, height: 0 },
         textShadowRadius: 8,
@@ -189,8 +190,8 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     dotActive: {
-        backgroundColor: '#38BDF8',
-        shadowColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
+        shadowColor: Theme.colors.fixed,
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 1,
         shadowRadius: 4,
@@ -204,33 +205,33 @@ const styles = StyleSheet.create({
         paddingVertical: 24,
     },
     cardContainer: {
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         borderRadius: 20,
         padding: 24,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         gap: 14,
     },
     mainTitle: {
         fontSize: 22,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         lineHeight: 28,
     },
     lastUpdate: {
         fontSize: 12,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         marginBottom: 8,
     },
     sectionHeader: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         marginTop: 8,
     },
     bodyText: {
         fontSize: 14,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         lineHeight: 22,
     },
-});
+});

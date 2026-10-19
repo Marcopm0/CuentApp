@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
 import { Budget, Transaction, UserProfile } from '@/types/database';
 import { deduplicateBudgets } from '@/utils/budgets';
@@ -549,21 +550,21 @@ export default function GraficasScreen() {
 
     // Colores para las barras de progreso del Top de Categorías
     const categoriaColores = [
-        '#38BDF8', // Cyan
-        '#A855F7', // Morado
-        '#F59E0B', // Ámbar
-        '#10B981', // Esmeralda
-        '#EC4899', // Rosa
-        '#6366F1', // Índigo
-        '#14B8A6', // Teal
-        '#F97316', // Naranja
+        Theme.colors.fixed,   // Cyan
+        Theme.colors.savings, // Morado
+        Theme.colors.leisure, // Ámbar
+        Theme.colors.buffer,  // Esmeralda
+        '#EC4899',            // Rosa
+        '#6366F1',            // Índigo
+        '#14B8A6',            // Teal
+        '#F97316',            // Naranja
     ];
 
     if (loading) {
         return (
             <SafeAreaView style={styles.loadingContainer}>
-                <StatusBar barStyle="light-content" backgroundColor="#0B0F17" />
-                <ActivityIndicator size="large" color="#38BDF8" />
+                <StatusBar barStyle="light-content" backgroundColor={Theme.colors.background} />
+                <ActivityIndicator size="large" color={Theme.colors.fixed} />
                 <Text style={styles.loadingText}>Cargando análisis financiero...</Text>
             </SafeAreaView>
         );
@@ -571,7 +572,7 @@ export default function GraficasScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <StatusBar barStyle="light-content" backgroundColor="#0B0F17" />
+            <StatusBar barStyle="light-content" backgroundColor={Theme.colors.background} />
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
@@ -579,8 +580,8 @@ export default function GraficasScreen() {
                     <RefreshControl
                         refreshing={refreshing}
                         onRefresh={onRefresh}
-                        tintColor="#38BDF8"
-                        colors={['#38BDF8']}
+                        tintColor={Theme.colors.fixed}
+                        colors={[Theme.colors.fixed]}
                     />
                 }
             >
@@ -597,7 +598,7 @@ export default function GraficasScreen() {
 
                     {/* Badge informativo de fecha/ciclo */}
                     <View style={styles.periodBadge}>
-                        <Ionicons name="calendar-outline" size={13} color="#38BDF8" />
+                        <Ionicons name="calendar-outline" size={13} color={Theme.colors.fixed} />
                         <Text style={styles.periodBadgeText}>
                             {effectiveScope === 'cycle' ? periodInfo.label : currentMonthLabel}
                         </Text>
@@ -618,7 +619,7 @@ export default function GraficasScreen() {
                             <Ionicons
                                 name="flash-outline"
                                 size={14}
-                                color={effectiveScope === 'cycle' ? '#0B0F17' : '#94A3B8'}
+                                color={effectiveScope === 'cycle' ? Theme.colors.background : Theme.colors.textSecondary}
                             />
                             <Text
                                 style={[
@@ -641,7 +642,7 @@ export default function GraficasScreen() {
                             <Ionicons
                                 name="calendar"
                                 size={14}
-                                color={effectiveScope === 'month' ? '#0B0F17' : '#94A3B8'}
+                                color={effectiveScope === 'month' ? Theme.colors.background : Theme.colors.textSecondary}
                             />
                             <Text
                                 style={[
@@ -656,7 +657,7 @@ export default function GraficasScreen() {
                 ) : (
                     <View style={styles.monthlyConsolidatedCard}>
                         <View style={styles.monthlyConsolidatedBadge}>
-                            <Ionicons name="calendar" size={15} color="#38BDF8" />
+                            <Ionicons name="calendar" size={15} color={Theme.colors.fixed} />
                             <Text style={styles.monthlyConsolidatedTitle}>
                                 Vista Consolidada: Mes Completo
                             </Text>
@@ -674,7 +675,7 @@ export default function GraficasScreen() {
                     <View style={styles.cardHeader}>
                         <View style={styles.cardHeaderLeft}>
                             <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
-                                <Ionicons name="wallet-outline" size={18} color="#38BDF8" />
+                                <Ionicons name="wallet-outline" size={18} color={Theme.colors.fixed} />
                             </View>
                             <Text style={styles.cardTitle}>Balance del Periodo</Text>
                         </View>
@@ -702,7 +703,7 @@ export default function GraficasScreen() {
                             <Text
                                 style={[
                                     styles.netRemainingAmount,
-                                    { color: remanenteNeto >= 0 ? '#10B981' : '#EF4444' },
+                                    { color: remanenteNeto >= 0 ? Theme.colors.statusSuccess : Theme.colors.statusDanger },
                                 ]}
                             >
                                 {remanenteNeto >= 0 ? '+' : ''}
@@ -724,10 +725,10 @@ export default function GraficasScreen() {
                         {/* Columna Ingresos */}
                         <View style={styles.balanceColumn}>
                             <View style={styles.balanceItemHeader}>
-                                <Ionicons name="arrow-down-circle" size={16} color="#34D399" />
+                                <Ionicons name="arrow-down-circle" size={16} color={Theme.colors.income} />
                                 <Text style={styles.balanceItemLabel}>Ingresos</Text>
                             </View>
-                            <Text style={[styles.balanceItemValue, { color: '#34D399' }]}>
+                            <Text style={[styles.balanceItemValue, { color: Theme.colors.income }]}>
                                 +{formatCurrency(totalIngresos)}
                             </Text>
                             <Text style={styles.balanceItemSub}>
@@ -741,10 +742,10 @@ export default function GraficasScreen() {
                         {/* Columna Gastos Totales */}
                         <View style={styles.balanceColumn}>
                             <View style={styles.balanceItemHeader}>
-                                <Ionicons name="arrow-up-circle" size={16} color="#F87171" />
+                                <Ionicons name="arrow-up-circle" size={16} color={Theme.colors.expense} />
                                 <Text style={styles.balanceItemLabel}>Gastos Totales</Text>
                             </View>
-                            <Text style={[styles.balanceItemValue, { color: '#F87171' }]}>
+                            <Text style={[styles.balanceItemValue, { color: Theme.colors.expense }]}>
                                 -{formatCurrency(totalGastosReales)}
                             </Text>
                             <Text style={styles.balanceItemSub}>
@@ -776,7 +777,7 @@ export default function GraficasScreen() {
                     <View style={styles.cardHeader}>
                         <View style={styles.cardHeaderLeft}>
                             <View style={[styles.iconCircle, { backgroundColor: 'rgba(168, 85, 247, 0.15)' }]}>
-                                <Feather name="pie-chart" size={17} color="#A855F7" />
+                                <Feather name="pie-chart" size={17} color={Theme.colors.savings} />
                             </View>
                             <View>
                                 <Text style={styles.cardTitle}>Distribución de Bolsas</Text>
@@ -796,7 +797,7 @@ export default function GraficasScreen() {
                             <View
                                 style={[
                                     styles.segment,
-                                    { flex: pctFijos, backgroundColor: '#38BDF8' },
+                                    { flex: pctFijos, backgroundColor: Theme.colors.fixed },
                                 ]}
                             />
                         )}
@@ -804,7 +805,7 @@ export default function GraficasScreen() {
                             <View
                                 style={[
                                     styles.segment,
-                                    { flex: pctAhorro, backgroundColor: '#A855F7' },
+                                    { flex: pctAhorro, backgroundColor: Theme.colors.savings },
                                 ]}
                             />
                         )}
@@ -812,7 +813,7 @@ export default function GraficasScreen() {
                             <View
                                 style={[
                                     styles.segment,
-                                    { flex: pctOcio, backgroundColor: '#F59E0B' },
+                                    { flex: pctOcio, backgroundColor: Theme.colors.leisure },
                                 ]}
                             />
                         )}
@@ -820,12 +821,12 @@ export default function GraficasScreen() {
                             <View
                                 style={[
                                     styles.segment,
-                                    { flex: pctBuffer, backgroundColor: '#10B981' },
+                                    { flex: pctBuffer, backgroundColor: Theme.colors.buffer },
                                 ]}
                             />
                         )}
                         {totalMaster === 0 && (
-                            <View style={[styles.segment, { flex: 1, backgroundColor: '#24324D' }]} />
+                            <View style={[styles.segment, { flex: 1, backgroundColor: Theme.colors.border }]} />
                         )}
                     </View>
 
@@ -834,7 +835,7 @@ export default function GraficasScreen() {
                         {/* Bolsa 1: Gastos Fijos */}
                         <View style={styles.legendItem}>
                             <View style={styles.legendDotRow}>
-                                <View style={[styles.legendDot, { backgroundColor: '#38BDF8' }]} />
+                                <View style={[styles.legendDot, { backgroundColor: Theme.colors.fixed }]} />
                                 <Text style={styles.legendName} numberOfLines={1}>
                                     🏠 Gastos Fijos
                                 </Text>
@@ -852,7 +853,7 @@ export default function GraficasScreen() {
                         {/* Bolsa 2: Ahorro Programado */}
                         <View style={styles.legendItem}>
                             <View style={styles.legendDotRow}>
-                                <View style={[styles.legendDot, { backgroundColor: '#A855F7' }]} />
+                                <View style={[styles.legendDot, { backgroundColor: Theme.colors.savings }]} />
                                 <Text style={styles.legendName} numberOfLines={1}>
                                     🐖 Ahorro
                                 </Text>
@@ -870,7 +871,7 @@ export default function GraficasScreen() {
                         {/* Bolsa 3: Ocio / Variable */}
                         <View style={styles.legendItem}>
                             <View style={styles.legendDotRow}>
-                                <View style={[styles.legendDot, { backgroundColor: '#F59E0B' }]} />
+                                <View style={[styles.legendDot, { backgroundColor: Theme.colors.leisure }]} />
                                 <Text style={styles.legendName} numberOfLines={1}>
                                     🍿 Ocio / Variable
                                 </Text>
@@ -888,7 +889,7 @@ export default function GraficasScreen() {
                         {/* Bolsa 4: Colchón / Buffer */}
                         <View style={styles.legendItem}>
                             <View style={styles.legendDotRow}>
-                                <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+                                <View style={[styles.legendDot, { backgroundColor: Theme.colors.buffer }]} />
                                 <Text style={styles.legendName} numberOfLines={1}>
                                     🛡️ Colchón / Buffer
                                 </Text>
@@ -912,7 +913,7 @@ export default function GraficasScreen() {
                     <View style={styles.cardHeader}>
                         <View style={styles.cardHeaderLeft}>
                             <View style={[styles.iconCircle, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-                                <Ionicons name="bar-chart-outline" size={18} color="#F59E0B" />
+                                <Ionicons name="bar-chart-outline" size={18} color={Theme.colors.leisure} />
                             </View>
                             <View>
                                 <Text style={styles.cardTitle}>Top de Gastos por Categoría</Text>
@@ -925,7 +926,7 @@ export default function GraficasScreen() {
 
                     {topCategorias.length === 0 ? (
                         <View style={styles.emptyStateContainer}>
-                            <Ionicons name="receipt-outline" size={40} color="#475569" />
+                            <Ionicons name="receipt-outline" size={40} color={Theme.colors.textMuted} />
                             <Text style={styles.emptyStateTitle}>
                                 Sin gastos registrados en este periodo
                             </Text>
@@ -982,7 +983,7 @@ export default function GraficasScreen() {
                     <View style={styles.cardHeader}>
                         <View style={styles.cardHeaderLeft}>
                             <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                                <MaterialCommunityIcons name="shield-check-outline" size={18} color="#10B981" />
+                                <MaterialCommunityIcons name="shield-check-outline" size={18} color={Theme.colors.buffer} />
                             </View>
                             <View>
                                 <Text style={styles.cardTitle}>Salud del Presupuesto</Text>
@@ -1046,7 +1047,7 @@ export default function GraficasScreen() {
                                     {
                                         width: `${Math.min(100, saludPresupuesto.fijos.compromisoPct)}%`,
                                         backgroundColor:
-                                            saludPresupuesto.fijos.compromisoPct >= 100 ? '#10B981' : '#38BDF8',
+                                            saludPresupuesto.fijos.compromisoPct >= 100 ? Theme.colors.statusSuccess : Theme.colors.fixed,
                                     },
                                 ]}
                             />
@@ -1122,10 +1123,10 @@ export default function GraficasScreen() {
                                     {
                                         width: `${Math.min(100, saludPresupuesto.ocio.ocioPct)}%`,
                                         backgroundColor: saludPresupuesto.ocio.isLimitReached
-                                            ? '#EF4444'
+                                            ? Theme.colors.statusDanger
                                             : saludPresupuesto.ocio.isAccelerated
-                                                ? '#F59E0B'
-                                                : '#10B981',
+                                                ? Theme.colors.statusWarning
+                                                : Theme.colors.statusSuccess,
                                     },
                                 ]}
                             />
@@ -1200,12 +1201,12 @@ export default function GraficasScreen() {
                                         width: `${Math.min(100, saludPresupuesto.buffer.bufferPctIntacto)}%`,
                                         backgroundColor:
                                             saludPresupuesto.buffer.bufferTotalInicial === 0
-                                                ? '#475569'
+                                                ? Theme.colors.textMuted
                                                 : saludPresupuesto.buffer.bufferConsumido === 0 || saludPresupuesto.buffer.isBufferActiveHealthy
-                                                    ? '#10B981'
+                                                    ? Theme.colors.buffer
                                                     : saludPresupuesto.buffer.isBufferWarning
-                                                        ? '#F59E0B'
-                                                        : '#EF4444',
+                                                        ? Theme.colors.statusWarning
+                                                        : Theme.colors.statusDanger,
                                     },
                                 ]}
                             />
@@ -1223,22 +1224,21 @@ export default function GraficasScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     loadingContainer: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
         justifyContent: 'center',
         alignItems: 'center',
         gap: 12,
     },
     loadingText: {
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontSize: 14,
         fontWeight: '500',
     },
     scrollContent: {
-
         paddingHorizontal: 16,
         paddingTop: 12,
         paddingBottom: 110,
@@ -1256,39 +1256,39 @@ const styles = StyleSheet.create({
     screenTitle: {
         fontSize: 26,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         letterSpacing: -0.5,
     },
     screenSubtitle: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         marginTop: 2,
     },
     periodBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     periodBadgeText: {
         fontSize: 12,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
     },
 
     // Selector de Temporalidad (Pill Segmentado)
     temporalToggleContainer: {
         flexDirection: 'row',
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         borderRadius: 14,
         padding: 4,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         gap: 6,
     },
     temporalTab: {
@@ -1302,24 +1302,24 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     temporalTabActive: {
-        backgroundColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
     },
     temporalTabText: {
         fontSize: 13,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     temporalTabTextActive: {
-        color: '#0B0F17',
+        color: Theme.colors.background,
         fontWeight: '800',
     },
     monthlyConsolidatedCard: {
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         borderRadius: 14,
         paddingHorizontal: 14,
         paddingVertical: 10,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -1332,20 +1332,20 @@ const styles = StyleSheet.create({
     monthlyConsolidatedTitle: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
     },
     monthlyConsolidatedSubtitle: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
     },
 
     // Tarjeta Modular Base
     card: {
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         borderRadius: 24,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         padding: 18,
         gap: 14,
     },
@@ -1370,16 +1370,16 @@ const styles = StyleSheet.create({
     cardTitle: {
         fontSize: 17,
         fontWeight: '700',
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
     },
     cardSubtitle: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         marginTop: 1,
     },
     cardDivider: {
         height: 1,
-        backgroundColor: '#1E293B',
+        backgroundColor: Theme.colors.borderSubtle,
         width: '100%',
     },
     innerDivider: {
@@ -1406,23 +1406,23 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     statusTextPositive: {
-        color: '#10B981',
+        color: Theme.colors.statusSuccess,
     },
     statusTextNegative: {
-        color: '#EF4444',
+        color: Theme.colors.statusDanger,
     },
     netRemainingBox: {
-        backgroundColor: '#0E1420',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         padding: 16,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#1E293B',
+        borderColor: Theme.colors.borderSubtle,
         gap: 4,
     },
     netRemainingLabel: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
@@ -1439,11 +1439,11 @@ const styles = StyleSheet.create({
     currencyBadge: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     netRemainingExplanation: {
         fontSize: 12,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         marginTop: 4,
         lineHeight: 16,
     },
@@ -1465,7 +1465,7 @@ const styles = StyleSheet.create({
     balanceItemLabel: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     balanceItemValue: {
         fontSize: 18,
@@ -1473,11 +1473,11 @@ const styles = StyleSheet.create({
     },
     balanceItemSub: {
         fontSize: 11,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     verticalDivider: {
         width: 1,
-        backgroundColor: '#1E293B',
+        backgroundColor: Theme.colors.borderSubtle,
         alignSelf: 'stretch',
     },
     balanceFootnote: {
@@ -1488,11 +1488,11 @@ const styles = StyleSheet.create({
     },
     balanceFootnoteText: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         lineHeight: 16,
     },
     footnoteHighlight: {
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
         fontWeight: '700',
     },
 
@@ -1500,7 +1500,7 @@ const styles = StyleSheet.create({
     totalBudgetBadge: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         backgroundColor: 'rgba(56, 189, 248, 0.12)',
         paddingHorizontal: 8,
         paddingVertical: 4,
@@ -1511,7 +1511,7 @@ const styles = StyleSheet.create({
         height: 14,
         borderRadius: 7,
         overflow: 'hidden',
-        backgroundColor: '#24324D',
+        backgroundColor: Theme.colors.border,
         marginTop: 4,
     },
     segment: {
@@ -1525,11 +1525,11 @@ const styles = StyleSheet.create({
     },
     legendItem: {
         width: '48%',
-        backgroundColor: '#0E1420',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         borderRadius: 12,
         padding: 10,
         borderWidth: 1,
-        borderColor: '#1E293B',
+        borderColor: Theme.colors.borderSubtle,
         gap: 4,
     },
     legendDotRow: {
@@ -1545,7 +1545,7 @@ const styles = StyleSheet.create({
     legendName: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         flex: 1,
     },
     legendValuesRow: {
@@ -1557,12 +1557,12 @@ const styles = StyleSheet.create({
     legendPercentage: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     legendAmount: {
         fontSize: 13,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
     },
 
     // Módulo 3: Top Gastos
@@ -1575,14 +1575,14 @@ const styles = StyleSheet.create({
     emptyStateTitle: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontStyle: 'italic',
         marginTop: 6,
         textAlign: 'center',
     },
     emptyStateSubtitle: {
         fontSize: 12,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         textAlign: 'center',
         paddingHorizontal: 16,
     },
@@ -1607,7 +1607,7 @@ const styles = StyleSheet.create({
     categoryNameText: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
         flexShrink: 1,
     },
     categoryAmountRow: {
@@ -1618,7 +1618,7 @@ const styles = StyleSheet.create({
     categoryAmountText: {
         fontSize: 14,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
     },
     categoryPctBadge: {
         fontSize: 12,
@@ -1629,7 +1629,7 @@ const styles = StyleSheet.create({
     categoryTrackBar: {
         height: 7,
         borderRadius: 4,
-        backgroundColor: '#24324D',
+        backgroundColor: Theme.colors.border,
         overflow: 'hidden',
     },
     categoryFillBar: {
@@ -1653,11 +1653,11 @@ const styles = StyleSheet.create({
     healthItemTitle: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
     },
     healthItemSub: {
         fontSize: 11,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     healthBadge: {
         paddingHorizontal: 8,
@@ -1684,19 +1684,19 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     healthTextSuccess: {
-        color: '#10B981',
+        color: Theme.colors.statusSuccess,
     },
     healthTextProgress: {
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
     },
     healthTextWarning: {
-        color: '#F59E0B',
+        color: Theme.colors.statusWarning,
     },
     healthTextDanger: {
-        color: '#EF4444',
+        color: Theme.colors.statusDanger,
     },
     healthTextPending: {
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     healthItemAmounts: {
         flexDirection: 'row',
@@ -1706,28 +1706,28 @@ const styles = StyleSheet.create({
     healthNumbers: {
         fontSize: 15,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
     },
     healthNumbersMuted: {
         fontSize: 12,
         fontWeight: '500',
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     healthRemainingSub: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     healthPacingLegend: {
         fontSize: 12,
         fontWeight: '500',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         marginTop: -2,
     },
     healthTrackBar: {
         height: 8,
         borderRadius: 4,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
         overflow: 'hidden',
     },
     healthFillBar: {

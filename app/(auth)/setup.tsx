@@ -16,6 +16,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Theme } from '@/constants/theme';
 
 interface ExpenseOption {
     id: string;
@@ -245,7 +246,7 @@ export default function SetupScreen() {
                         {step === 1 && (
                             <View style={styles.stepContent}>
                                 <View style={styles.iconCircle}>
-                                    <Ionicons name="wallet-outline" size={32} color="#38BDF8" />
+                                    <Ionicons name="wallet-outline" size={32} color={Theme.colors.borderFocus} />
                                 </View>
                                 <Text style={styles.title}>¿Cómo recibes tus ingresos?</Text>
                                 <Text style={styles.subtitle}>
@@ -342,7 +343,7 @@ export default function SetupScreen() {
                                     <TextInput
                                         style={styles.amountInput}
                                         placeholder="0.00"
-                                        placeholderTextColor="#475569"
+                                        placeholderTextColor={Theme.colors.textMuted}
                                         keyboardType="numeric"
                                         value={periodAmount}
                                         onChangeText={setPeriodAmount}
@@ -354,7 +355,7 @@ export default function SetupScreen() {
                                 {/* Nota de conversión al mes */}
                                 {numericPeriodAmount > 0 && payFrequency !== 'monthly' && (
                                     <View style={styles.monthlyEquivalentBadge}>
-                                        <Ionicons name="information-circle-outline" size={16} color="#38BDF8" />
+                                        <Ionicons name="information-circle-outline" size={16} color={Theme.colors.borderFocus} />
                                         <Text style={styles.monthlyEquivalentText}>
                                             Equivale a un ingreso de{' '}
                                             <Text style={styles.summaryHighlight}>
@@ -371,7 +372,7 @@ export default function SetupScreen() {
                         {step === 2 && (
                             <View style={styles.stepContent}>
                                 <View style={styles.iconCircle}>
-                                    <Ionicons name="receipt-outline" size={32} color="#38BDF8" />
+                                    <Ionicons name="receipt-outline" size={32} color={Theme.colors.borderFocus} />
                                 </View>
                                 <Text style={styles.title}>Tus Gastos Fijos</Text>
                                 <Text style={styles.subtitle}>
@@ -395,7 +396,7 @@ export default function SetupScreen() {
                                                 <Ionicons
                                                     name={item.icon}
                                                     size={22}
-                                                    color={item.selected ? '#38BDF8' : '#94A3B8'}
+                                                    color={item.selected ? Theme.colors.borderFocus : Theme.colors.textSecondary}
                                                 />
                                                 <Text
                                                     style={[
@@ -408,7 +409,7 @@ export default function SetupScreen() {
                                                 <Ionicons
                                                     name={item.selected ? 'checkbox' : 'square-outline'}
                                                     size={22}
-                                                    color={item.selected ? '#38BDF8' : '#64748B'}
+                                                    color={item.selected ? Theme.colors.borderFocus : Theme.colors.textMuted}
                                                 />
                                             </TouchableOpacity>
 
@@ -419,7 +420,7 @@ export default function SetupScreen() {
                                                         <TextInput
                                                             style={styles.expenseInput}
                                                             placeholder="Monto mensual"
-                                                            placeholderTextColor="#475569"
+                                                            placeholderTextColor={Theme.colors.textMuted}
                                                             keyboardType="numeric"
                                                             value={item.amount}
                                                             onChangeText={(val) => updateExpenseAmount(item.id, val)}
@@ -502,7 +503,7 @@ export default function SetupScreen() {
                                 {showSyncQuestion && (
                                     <View style={styles.syncCard}>
                                         <View style={styles.syncCardHeader}>
-                                            <Ionicons name="calendar-outline" size={22} color="#38BDF8" />
+                                            <Ionicons name="calendar-outline" size={22} color={Theme.colors.borderFocus} />
                                             <Text style={styles.syncCardTitle}>Compromisos del inicio de ciclo</Text>
                                         </View>
                                         <Text style={styles.syncQuestionText}>
@@ -520,7 +521,7 @@ export default function SetupScreen() {
                                                 <Ionicons
                                                     name={hasPreSavedNextCycle === true ? 'radio-button-on' : 'radio-button-off'}
                                                     size={20}
-                                                    color={hasPreSavedNextCycle === true ? '#38BDF8' : '#64748B'}
+                                                    color={hasPreSavedNextCycle === true ? Theme.colors.borderFocus : Theme.colors.textMuted}
                                                 />
                                                 <Text
                                                     style={[
@@ -543,7 +544,7 @@ export default function SetupScreen() {
                                                 <Ionicons
                                                     name={hasPreSavedNextCycle === false ? 'radio-button-on' : 'radio-button-off'}
                                                     size={20}
-                                                    color={hasPreSavedNextCycle === false ? '#38BDF8' : '#64748B'}
+                                                    color={hasPreSavedNextCycle === false ? Theme.colors.borderFocus : Theme.colors.textMuted}
                                                 />
                                                 <Text
                                                     style={[
@@ -564,7 +565,7 @@ export default function SetupScreen() {
                         {step === 3 && (
                             <View style={styles.stepContent}>
                                 <View style={styles.iconCircle}>
-                                    <Ionicons name="sparkles-outline" size={32} color="#38BDF8" />
+                                    <Ionicons name="sparkles-outline" size={32} color={Theme.colors.borderFocus} />
                                 </View>
                                 <Text style={styles.title}>Ahorro y Ocio</Text>
                                 <Text style={styles.subtitle}>
@@ -579,7 +580,7 @@ export default function SetupScreen() {
                                         <TextInput
                                             style={styles.amountInput}
                                             placeholder="0.00"
-                                            placeholderTextColor="#475569"
+                                            placeholderTextColor={Theme.colors.textMuted}
                                             keyboardType="numeric"
                                             value={savings}
                                             onChangeText={setSavings}
@@ -595,7 +596,7 @@ export default function SetupScreen() {
                                         <TextInput
                                             style={styles.amountInput}
                                             placeholder="0.00"
-                                            placeholderTextColor="#475569"
+                                            placeholderTextColor={Theme.colors.textMuted}
                                             keyboardType="numeric"
                                             value={leisure}
                                             onChangeText={setLeisure}
@@ -614,7 +615,7 @@ export default function SetupScreen() {
                                     <Ionicons
                                         name={unallocatedBuffer < 0 ? 'alert-circle' : 'shield-checkmark-outline'}
                                         size={22}
-                                        color={unallocatedBuffer < 0 ? '#F87171' : '#38BDF8'}
+                                        color={unallocatedBuffer < 0 ? Theme.colors.statusDanger : Theme.colors.borderFocus}
                                     />
                                     <View style={styles.bufferTextContainer}>
                                         <Text
@@ -669,13 +670,14 @@ export default function SetupScreen() {
                                     activeOpacity={0.8}
                                 >
                                     {isLoading ? (
-                                        <ActivityIndicator color="#0B0F17" />
+                                        <ActivityIndicator color={Theme.colors.background} />
                                     ) : (
                                         <Text style={styles.primaryButtonText}>Comenzar en CuentApp</Text>
                                     )}
                                 </TouchableOpacity>
                             )}
                         </View>
+
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -686,7 +688,7 @@ export default function SetupScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     keyboardView: {
         flex: 1,
@@ -698,13 +700,13 @@ const styles = StyleSheet.create({
         paddingVertical: 24,
     },
     cardContainer: {
-        backgroundColor: '#161F30',
-        borderRadius: 24,
+        backgroundColor: Theme.colors.cardSurface,
+        borderRadius: Theme.radius.xl,
         padding: 24,
         gap: 20,
         borderWidth: 1.5,
-        borderColor: '#38BDF8',
-        shadowColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
+        shadowColor: Theme.colors.borderFocus,
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.65,
         shadowRadius: 18,
@@ -721,15 +723,15 @@ const styles = StyleSheet.create({
         borderRadius: 3,
     },
     stepPillActive: {
-        backgroundColor: '#38BDF8',
-        shadowColor: '#38BDF8',
+        backgroundColor: Theme.colors.borderFocus,
+        shadowColor: Theme.colors.borderFocus,
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.8,
         shadowRadius: 6,
         elevation: 4,
     },
     stepPillInactive: {
-        backgroundColor: '#24324D',
+        backgroundColor: Theme.colors.border,
     },
     stepContent: {
         alignItems: 'center',
@@ -748,12 +750,12 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 22,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         textAlign: 'center',
     },
     subtitle: {
         fontSize: 14,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         textAlign: 'center',
         lineHeight: 20,
         paddingHorizontal: 6,
@@ -761,10 +763,10 @@ const styles = StyleSheet.create({
     amountInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#0B0F17',
-        borderRadius: 14,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.lg,
         borderWidth: 1.5,
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         paddingHorizontal: 16,
         paddingVertical: 6,
         width: '100%',
@@ -773,20 +775,20 @@ const styles = StyleSheet.create({
     currencySymbol: {
         fontSize: 26,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
         marginRight: 6,
     },
     amountInput: {
         flex: 1,
         fontSize: 24,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         paddingVertical: 6,
     },
     currencyCode: {
         fontSize: 13,
         fontWeight: '600',
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     expensesList: {
         width: '100%',
@@ -794,15 +796,15 @@ const styles = StyleSheet.create({
         marginTop: 6,
     },
     expenseItemCard: {
-        backgroundColor: '#0B0F17',
-        borderRadius: 14,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.lg,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         padding: 12,
         gap: 10,
     },
     expenseItemCardActive: {
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         backgroundColor: 'rgba(56, 189, 248, 0.05)',
     },
     expenseHeader: {
@@ -814,57 +816,57 @@ const styles = StyleSheet.create({
     expenseName: {
         flex: 1,
         fontSize: 15,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontWeight: '600',
     },
     expenseNameActive: {
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontWeight: '700',
     },
     expenseInputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#161F30',
-        borderRadius: 10,
+        backgroundColor: Theme.colors.cardSurface,
+        borderRadius: Theme.radius.sm,
         borderWidth: 1,
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         paddingHorizontal: 12,
         paddingVertical: 4,
     },
     expenseInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 16,
         fontWeight: '600',
         paddingVertical: 4,
     },
     smallCurrency: {
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
         fontSize: 16,
         fontWeight: '700',
         marginRight: 6,
     },
     smallCode: {
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         fontSize: 12,
         fontWeight: '600',
     },
     summaryBar: {
         width: '100%',
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         padding: 12,
-        borderRadius: 12,
+        borderRadius: Theme.radius.md,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         alignItems: 'center',
         marginTop: 6,
     },
     summaryText: {
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontSize: 14,
     },
     summaryHighlight: {
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
         fontWeight: '700',
     },
     inputBlock: {
@@ -873,7 +875,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     inputLabel: {
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -881,17 +883,17 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: 12,
-        backgroundColor: '#0B0F17',
-        borderRadius: 14,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.lg,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         padding: 14,
         width: '100%',
         marginTop: 8,
     },
     bufferCardError: {
-        borderColor: '#F87171',
-        backgroundColor: 'rgba(248, 113, 113, 0.08)',
+        borderColor: Theme.colors.statusDanger,
+        backgroundColor: 'rgba(239, 68, 68, 0.08)',
     },
     bufferTextContainer: {
         flex: 1,
@@ -899,15 +901,15 @@ const styles = StyleSheet.create({
     bufferTitle: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
         marginBottom: 2,
     },
     bufferTitleError: {
-        color: '#F87171',
+        color: Theme.colors.statusDanger,
     },
     bufferDescription: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         lineHeight: 16,
     },
     actionsContainer: {
@@ -917,33 +919,33 @@ const styles = StyleSheet.create({
     },
     primaryButton: {
         flex: 1,
-        backgroundColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
         paddingVertical: 14,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         alignItems: 'center',
-        shadowColor: '#38BDF8',
+        shadowColor: Theme.colors.fixed,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.5,
         shadowRadius: 10,
         elevation: 6,
     },
     primaryButtonText: {
-        color: '#0B0F17',
+        color: Theme.colors.background,
         fontSize: 16,
         fontWeight: '700',
     },
     secondaryButton: {
         paddingHorizontal: 20,
         paddingVertical: 14,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurface,
     },
     secondaryButtonText: {
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontSize: 15,
         fontWeight: '600',
     },
@@ -958,29 +960,29 @@ const styles = StyleSheet.create({
     },
     freqChip: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         paddingVertical: 12,
-        borderRadius: 12,
+        borderRadius: Theme.radius.md,
         alignItems: 'center',
         borderWidth: 1.5,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     freqChipActive: {
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         backgroundColor: 'rgba(56, 189, 248, 0.12)',
     },
     freqChipText: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     freqChipTextActive: {
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
     },
     inputLabelPeriod: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#E2E8F0',
+        color: Theme.colors.textPrimary,
         alignSelf: 'flex-start',
         marginTop: 10,
         marginBottom: 6,
@@ -989,7 +991,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: 'rgba(56, 189, 248, 0.08)',
-        borderRadius: 10,
+        borderRadius: Theme.radius.sm,
         padding: 10,
         gap: 6,
         marginTop: 14,
@@ -998,7 +1000,7 @@ const styles = StyleSheet.create({
     },
     monthlyEquivalentText: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         flex: 1,
     },
     daySelectorWrapper: {
@@ -1013,24 +1015,24 @@ const styles = StyleSheet.create({
     },
     dayChip: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         paddingVertical: 10,
-        borderRadius: 10,
+        borderRadius: Theme.radius.sm,
         alignItems: 'center',
         borderWidth: 1.5,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     dayChipActive: {
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         backgroundColor: 'rgba(56, 189, 248, 0.12)',
     },
     dayChipText: {
         fontSize: 12,
         fontWeight: '700',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     dayChipTextActive: {
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
     },
     expenseConfigContainer: {
         gap: 8,
@@ -1043,7 +1045,7 @@ const styles = StyleSheet.create({
     },
     dueBlockSectionLabel: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontWeight: '600',
     },
     dueBlockRow: {
@@ -1053,33 +1055,33 @@ const styles = StyleSheet.create({
     },
     dueBlockChip: {
         flex: 1,
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         paddingVertical: 8,
-        borderRadius: 8,
+        borderRadius: Theme.radius.sm,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     dueBlockChipActive: {
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         backgroundColor: 'rgba(56, 189, 248, 0.15)',
     },
     dueBlockChipText: {
         fontSize: 11,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     dueBlockChipTextActive: {
-        color: '#38BDF8',
+        color: Theme.colors.borderFocus,
         fontWeight: '700',
     },
     syncCard: {
         width: '100%',
-        backgroundColor: '#0F172A',
-        borderRadius: 16,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.lg,
         padding: 16,
         borderWidth: 1.5,
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         marginTop: 16,
         gap: 12,
     },
@@ -1091,11 +1093,11 @@ const styles = StyleSheet.create({
     syncCardTitle: {
         fontSize: 14,
         fontWeight: 'bold',
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
     },
     syncQuestionText: {
         fontSize: 14,
-        color: '#CBD5E1',
+        color: Theme.colors.textSecondary,
         lineHeight: 20,
     },
     syncButtonsContainer: {
@@ -1106,26 +1108,26 @@ const styles = StyleSheet.create({
     syncOptionButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         paddingVertical: 12,
         paddingHorizontal: 14,
-        borderRadius: 12,
+        borderRadius: Theme.radius.md,
         borderWidth: 1.5,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         gap: 10,
     },
     syncOptionButtonActive: {
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.borderFocus,
         backgroundColor: 'rgba(56, 189, 248, 0.12)',
     },
     syncOptionText: {
         fontSize: 13,
         fontWeight: '600',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         flex: 1,
     },
     syncOptionTextActive: {
-        color: '#F8FAFC',
+        color: Theme.colors.textPrimary,
         fontWeight: '700',
     },
-});
+});

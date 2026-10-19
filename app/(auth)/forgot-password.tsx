@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Servicios de Firebase
 import { sendPasswordResetEmail } from 'firebase/auth';
+import { Theme } from '@/constants/theme';
 import { auth } from '../../services/firebase';
 
 export default function ForgotPasswordScreen() {
@@ -83,7 +84,7 @@ export default function ForgotPasswordScreen() {
                         onPress={() => router.back()}
                         activeOpacity={0.7}
                     >
-                        <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                        <Ionicons name="arrow-back" size={24} color={Theme.colors.textPrimary} />
                     </TouchableOpacity>
 
                     <View style={styles.cardContainer}>
@@ -103,7 +104,7 @@ export default function ForgotPasswordScreen() {
                                 <TextInput
                                     style={styles.input}
                                     placeholder="ejemplo@correo.com"
-                                    placeholderTextColor="#64748B"
+                                    placeholderTextColor={Theme.colors.textMuted}
                                     value={email}
                                     onChangeText={setEmail}
                                     keyboardType="email-address"
@@ -120,7 +121,7 @@ export default function ForgotPasswordScreen() {
                                 disabled={isLoading}
                             >
                                 {isLoading ? (
-                                    <ActivityIndicator color="#0B0F17" />
+                                    <ActivityIndicator color={Theme.colors.background} />
                                 ) : (
                                     <Text style={styles.primaryButtonText}>Enviar enlace</Text>
                                 )}
@@ -147,7 +148,7 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     keyboardView: {
         flex: 1,
@@ -157,26 +158,26 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingHorizontal: 20,
         paddingVertical: 30,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     backButton: {
         width: 44,
         height: 44,
-        borderRadius: 12,
-        backgroundColor: '#161F30',
+        borderRadius: Theme.radius.md,
+        backgroundColor: Theme.colors.cardSurface,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 20,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     cardContainer: {
         width: '100%',
-        backgroundColor: '#161F30',
-        borderRadius: 24,
+        backgroundColor: Theme.colors.cardSurface,
+        borderRadius: Theme.radius.xl,
         paddingHorizontal: 24,
         paddingVertical: 36,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         borderWidth: 1,
         gap: 24,
     },
@@ -187,12 +188,12 @@ const styles = StyleSheet.create({
     appTitle: {
         fontSize: 30,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         letterSpacing: 0.5,
     },
     tagline: {
         fontSize: 14,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         textAlign: 'center',
         lineHeight: 20,
         marginTop: 6,
@@ -207,24 +208,24 @@ const styles = StyleSheet.create({
     },
     label: {
         fontSize: 14,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontWeight: '600',
     },
     input: {
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         paddingVertical: 14,
         paddingHorizontal: 16,
-        borderRadius: 12,
-        color: '#FFFFFF',
+        borderRadius: Theme.radius.md,
+        color: Theme.colors.textPrimary,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         fontSize: 15,
     },
     primaryButton: {
         width: '100%',
-        backgroundColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
         paddingVertical: 15,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         alignItems: 'center',
         marginTop: 6,
     },
@@ -232,15 +233,15 @@ const styles = StyleSheet.create({
         opacity: 0.6,
     },
     primaryButtonText: {
-        color: '#0B0F17',
+        color: Theme.colors.background,
         fontSize: 16,
         fontWeight: '700',
     },
     footerButtonText: {
         marginTop: 8,
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         textAlign: 'center',
         fontSize: 13,
         fontWeight: '600',
     },
-});
+});

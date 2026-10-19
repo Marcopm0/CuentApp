@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Servicio de Autenticación
 import { getAuthErrorMessage, registerUser } from '@/services/authService';
+import { Theme } from '@/constants/theme';
 
 export default function RegisterScreen() {
     const router = useRouter();
@@ -102,7 +103,7 @@ export default function RegisterScreen() {
                                 <TextInput
                                     style={styles.input}
                                     placeholder="Tu nombre o alias"
-                                    placeholderTextColor="#64748B"
+                                    placeholderTextColor={Theme.colors.textMuted}
                                     value={displayName}
                                     onChangeText={setDisplayName}
                                     autoCapitalize="words"
@@ -115,7 +116,7 @@ export default function RegisterScreen() {
                                 <TextInput
                                     style={styles.input}
                                     placeholder="ejemplo@correo.com"
-                                    placeholderTextColor="#64748B"
+                                    placeholderTextColor={Theme.colors.textMuted}
                                     value={email}
                                     onChangeText={setEmail}
                                     keyboardType="email-address"
@@ -131,7 +132,7 @@ export default function RegisterScreen() {
                                     <TextInput
                                         style={styles.passwordInput}
                                         placeholder="**********"
-                                        placeholderTextColor="#64748B"
+                                        placeholderTextColor={Theme.colors.textMuted}
                                         value={password}
                                         onChangeText={setPassword}
                                         secureTextEntry={!isPasswordVisible}
@@ -145,7 +146,7 @@ export default function RegisterScreen() {
                                         <Ionicons
                                             name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
                                             size={20}
-                                            color="#94A3B8"
+                                            color={Theme.colors.textSecondary}
                                         />
                                     </TouchableOpacity>
                                 </View>
@@ -158,7 +159,7 @@ export default function RegisterScreen() {
                                     <TextInput
                                         style={styles.passwordInput}
                                         placeholder="**********"
-                                        placeholderTextColor="#64748B"
+                                        placeholderTextColor={Theme.colors.textMuted}
                                         value={confirmPassword}
                                         onChangeText={setConfirmPassword}
                                         secureTextEntry={!isConfirmPasswordVisible}
@@ -173,7 +174,7 @@ export default function RegisterScreen() {
                                         <Ionicons
                                             name={isConfirmPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
                                             size={20}
-                                            color="#94A3B8"
+                                            color={Theme.colors.textSecondary}
                                         />
                                     </TouchableOpacity>
                                 </View>
@@ -187,7 +188,7 @@ export default function RegisterScreen() {
                                 disabled={isLoading}
                             >
                                 {isLoading ? (
-                                    <ActivityIndicator color="#0B0F17" />
+                                    <ActivityIndicator color={Theme.colors.background} />
                                 ) : (
                                     <Text style={styles.primaryButtonText}>Registrarme</Text>
                                 )}
@@ -214,7 +215,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     keyboardView: {
         flex: 1,
@@ -225,15 +226,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
         paddingVertical: 30,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     cardContainer: {
         width: '100%',
-        backgroundColor: '#161F30',
-        borderRadius: 24,
+        backgroundColor: Theme.colors.cardSurface,
+        borderRadius: Theme.radius.xl,
         paddingHorizontal: 24,
         paddingVertical: 36,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         borderWidth: 1,
         gap: 24,
     },
@@ -244,12 +245,12 @@ const styles = StyleSheet.create({
     appTitle: {
         fontSize: 32,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         letterSpacing: 0.5,
     },
     tagline: {
         fontSize: 15,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         textAlign: 'center',
         lineHeight: 20,
     },
@@ -259,7 +260,7 @@ const styles = StyleSheet.create({
     passwordInput: {
         flex: 1,
         paddingVertical: 14,
-        color: '#ffffff',
+        color: Theme.colors.textPrimary,
         fontSize: 15,
     },
     buttonContainer: {
@@ -269,9 +270,9 @@ const styles = StyleSheet.create({
     },
     primaryButton: {
         width: '100%',
-        backgroundColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
         paddingVertical: 15,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         alignItems: 'center',
         marginTop: 6,
     },
@@ -279,13 +280,13 @@ const styles = StyleSheet.create({
         opacity: 0.6,
     },
     primaryButtonText: {
-        color: '#0B0F17',
+        color: Theme.colors.background,
         fontSize: 16,
         fontWeight: '700',
     },
     footerButtonText: {
         marginTop: 8,
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         textDecorationLine: 'underline',
         textAlign: 'center',
         fontSize: 16,
@@ -297,26 +298,26 @@ const styles = StyleSheet.create({
     },
     Label: {
         fontSize: 14,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontWeight: '600',
     },
     input: {
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         paddingVertical: 14,
         paddingHorizontal: 16,
-        borderRadius: 12,
-        color: '#FFFFFF',
+        borderRadius: Theme.radius.md,
+        color: Theme.colors.textPrimary,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         fontSize: 15,
     },
     passwordInputWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#0B0F17',
-        borderRadius: 12,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.md,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         paddingHorizontal: 16,
     },
-});
+});

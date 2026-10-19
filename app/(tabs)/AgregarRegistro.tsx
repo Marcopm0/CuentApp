@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
 import { Budget, Transaction } from '@/types/database';
 import { deduplicateBudgets } from '@/utils/budgets';
@@ -320,7 +321,7 @@ export default function AgregarRegistroScreen() {
                                 style={styles.backButton}
                                 activeOpacity={0.7}
                             >
-                                <Ionicons name="arrow-back" size={22} color="#94A3B8" />
+                                <Ionicons name="arrow-back" size={22} color={Theme.colors.textSecondary} />
                             </TouchableOpacity>
                             <Text style={styles.screenTitle}>Nuevo Registro</Text>
                             <View style={{ width: 40 }} />
@@ -364,7 +365,7 @@ export default function AgregarRegistroScreen() {
                                         <TouchableOpacity
                                             style={[
                                                 styles.targetBtn,
-                                                targetBucket === 'leisure' && styles.targetBtnActive,
+                                                targetBucket === 'leisure' && styles.targetBtnActiveLeisure,
                                             ]}
                                             onPress={() => setTargetBucket('leisure')}
                                             activeOpacity={0.7}
@@ -372,7 +373,7 @@ export default function AgregarRegistroScreen() {
                                             <Text
                                                 style={[
                                                     styles.targetBtnText,
-                                                    targetBucket === 'leisure' && styles.targetBtnTextActive,
+                                                    targetBucket === 'leisure' && styles.targetBtnTextActiveLeisure,
                                                 ]}
                                             >
                                                 🍿 Ocio
@@ -382,7 +383,7 @@ export default function AgregarRegistroScreen() {
                                         <TouchableOpacity
                                             style={[
                                                 styles.targetBtn,
-                                                targetBucket === 'buffer' && styles.targetBtnActive,
+                                                targetBucket === 'buffer' && styles.targetBtnActiveBuffer,
                                             ]}
                                             onPress={() => setTargetBucket('buffer')}
                                             activeOpacity={0.7}
@@ -390,7 +391,7 @@ export default function AgregarRegistroScreen() {
                                             <Text
                                                 style={[
                                                     styles.targetBtnText,
-                                                    targetBucket === 'buffer' && styles.targetBtnTextActive,
+                                                    targetBucket === 'buffer' && styles.targetBtnTextActiveBuffer,
                                                 ]}
                                             >
                                                 🛡️ Colchón
@@ -400,7 +401,7 @@ export default function AgregarRegistroScreen() {
                                         <TouchableOpacity
                                             style={[
                                                 styles.targetBtn,
-                                                targetBucket === 'savings' && styles.targetBtnActive,
+                                                targetBucket === 'savings' && styles.targetBtnActiveSavings,
                                             ]}
                                             onPress={() => setTargetBucket('savings')}
                                             activeOpacity={0.7}
@@ -408,7 +409,7 @@ export default function AgregarRegistroScreen() {
                                             <Text
                                                 style={[
                                                     styles.targetBtnText,
-                                                    targetBucket === 'savings' && styles.targetBtnTextActive,
+                                                    targetBucket === 'savings' && styles.targetBtnTextActiveSavings,
                                                 ]}
                                             >
                                                 🐖 Ahorro
@@ -473,19 +474,19 @@ export default function AgregarRegistroScreen() {
                                         isExpense ? styles.amountExpense : styles.amountIncome,
                                     ]}
                                     placeholder="0.00"
-                                    placeholderTextColor="#475569"
+                                    placeholderTextColor={Theme.colors.textMuted}
                                     keyboardType="decimal-pad"
                                     value={amount}
                                     onChangeText={handleAmountChange}
                                     autoFocus={true}
-                                    selectionColor="#38BDF8"
+                                    selectionColor={Theme.colors.fixed}
                                 />
                             </View>
 
                             {/* Indicador de compromiso fijo con saldo pendiente */}
                             {selectedBudget?.isFixedExpense && pendingFixedAmount !== null && (
                                 <View style={styles.fixedLockHint}>
-                                    <Ionicons name="lock-closed" size={12} color="#38BDF8" />
+                                    <Ionicons name="lock-closed" size={12} color={Theme.colors.fixed} />
                                     <Text style={styles.fixedLockText}>
                                         Compromiso fijo · Saldo pendiente: ${pendingFixedAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
                                     </Text>
@@ -494,7 +495,7 @@ export default function AgregarRegistroScreen() {
 
                             {/* Concepto / En qué se gastó */}
                             <View style={styles.conceptBox}>
-                                <Ionicons name="pencil-outline" size={16} color="#94A3B8" />
+                                <Ionicons name="pencil-outline" size={16} color={Theme.colors.textSecondary} />
                                 <TextInput
                                     style={styles.conceptInput}
                                     placeholder={
@@ -502,7 +503,7 @@ export default function AgregarRegistroScreen() {
                                             ? '¿En qué se gastó? (Ej. Café, Tacos...)'
                                             : '¿De qué fue el ingreso? (Ej. Venta, Propina...)'
                                     }
-                                    placeholderTextColor="#64748B"
+                                    placeholderTextColor={Theme.colors.textMuted}
                                     value={description}
                                     onChangeText={setDescription}
                                     maxLength={45}
@@ -515,15 +516,15 @@ export default function AgregarRegistroScreen() {
                                     <Ionicons
                                         name="people"
                                         size={22}
-                                        color={isShared ? '#38BDF8' : '#64748B'}
+                                        color={isShared ? Theme.colors.fixed : Theme.colors.textMuted}
                                     />
                                     <Text style={styles.sharedHintText}>Fondo compartido</Text>
                                 </View>
                                 <Switch
                                     value={isShared}
                                     onValueChange={setIsShared}
-                                    trackColor={{ false: '#24324D', true: '#38BDF8' }}
-                                    thumbColor={isShared ? '#FFFFFF' : '#94A3B8'}
+                                    trackColor={{ false: Theme.colors.border, true: Theme.colors.fixed }}
+                                    thumbColor={isShared ? Theme.colors.textPrimary : Theme.colors.textSecondary}
                                 />
                             </View>
                         </View>
@@ -540,7 +541,7 @@ export default function AgregarRegistroScreen() {
                             activeOpacity={0.8}
                         >
                             {loading ? (
-                                <ActivityIndicator color="#FFFFFF" />
+                                <ActivityIndicator color={Theme.colors.textPrimary} />
                             ) : (
                                 <Text style={styles.saveButtonText}>
                                     {isExpense ? 'Guardar Gasto' : 'Guardar Ingreso'}
@@ -719,7 +720,7 @@ export default function AgregarRegistroScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     container: {
         flex: 1,
@@ -740,23 +741,23 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     screenTitle: {
         fontSize: 20,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         textAlign: 'center',
     },
     card: {
-        backgroundColor: '#161F30',
-        borderRadius: 24,
+        backgroundColor: Theme.colors.cardSurface,
+        borderRadius: Theme.radius.xl,
         borderWidth: 1.5,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         padding: 20,
         gap: 14,
     },
@@ -767,40 +768,40 @@ const styles = StyleSheet.create({
     },
     selectorBtn: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
         paddingVertical: 10,
         paddingHorizontal: 12,
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         alignItems: 'center',
         justifyContent: 'center',
     },
     selectorExpense: {
-        borderColor: 'rgba(239, 68, 68, 0.6)',
-        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+        borderColor: 'rgba(248, 113, 113, 0.6)',
+        backgroundColor: 'rgba(248, 113, 113, 0.1)',
     },
     selectorIncome: {
-        borderColor: 'rgba(16, 185, 129, 0.6)',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        borderColor: 'rgba(52, 211, 153, 0.6)',
+        backgroundColor: 'rgba(52, 211, 153, 0.1)',
     },
     selectorText: {
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 13,
         fontWeight: '700',
     },
     targetBucketContainer: {
         gap: 6,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
         padding: 10,
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     targetLabel: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
@@ -810,51 +811,64 @@ const styles = StyleSheet.create({
     },
     targetBtn: {
         flex: 1,
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         paddingVertical: 8,
         borderRadius: 10,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     targetBtnActive: {
-        borderColor: '#10B981',
+        borderColor: Theme.colors.statusSuccess,
         backgroundColor: 'rgba(16, 185, 129, 0.2)',
     },
     targetBtnActiveLeisure: {
-        borderColor: '#38BDF8',
-        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+        borderColor: Theme.colors.leisure,
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
     },
     targetBtnTextActiveLeisure: {
-        color: '#38BDF8',
+        color: Theme.colors.leisure,
         fontWeight: '700',
     },
     targetBtnActiveBuffer: {
-        borderColor: '#F59E0B',
-        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+        borderColor: Theme.colors.buffer,
+        backgroundColor: 'rgba(16, 185, 129, 0.15)',
     },
     targetBtnTextActiveBuffer: {
-        color: '#F59E0B',
+        color: Theme.colors.buffer,
+        fontWeight: '700',
+    },
+    targetBtnActiveSavings: {
+        borderColor: Theme.colors.savings,
+        backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    },
+    targetBtnTextActiveSavings: {
+        color: Theme.colors.savings,
         fontWeight: '700',
     },
     targetBtnText: {
         fontSize: 12,
         fontWeight: '700',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
     },
     targetBtnTextActive: {
-        color: '#10B981',
+        color: Theme.colors.statusSuccess,
     },
     amountDisplayRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 8,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.lg,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
     },
     amountPrefix: {
         fontSize: 36,
         fontWeight: '800',
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         marginRight: 4,
     },
     amountInput: {
@@ -864,25 +878,25 @@ const styles = StyleSheet.create({
         textAlign: 'left',
     },
     amountExpense: {
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
     },
     amountIncome: {
-        color: '#10B981',
+        color: Theme.colors.income,
     },
     conceptBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#0B0F17',
-        borderRadius: 14,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.md,
         paddingHorizontal: 14,
         paddingVertical: 10,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.borderSubtle,
         gap: 10,
     },
     conceptInput: {
         flex: 1,
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 15,
     },
     sharedRow: {
@@ -891,7 +905,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingTop: 6,
         borderTopWidth: 1,
-        borderTopColor: '#24324D',
+        borderTopColor: Theme.colors.borderSubtle,
     },
     sharedIcons: {
         flexDirection: 'row',
@@ -900,7 +914,7 @@ const styles = StyleSheet.create({
     },
     sharedHintText: {
         fontSize: 12,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         fontWeight: '600',
     },
     saveButton: {
@@ -912,13 +926,13 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     saveButtonExpense: {
-        backgroundColor: '#EF4444',
+        backgroundColor: Theme.colors.statusDanger,
     },
     saveButtonIncome: {
-        backgroundColor: '#10B981',
+        backgroundColor: Theme.colors.statusSuccess,
     },
     saveButtonText: {
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 16,
         fontWeight: '800',
     },
@@ -931,17 +945,17 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         width: '85%',
-        backgroundColor: '#161F30',
-        borderRadius: 20,
+        backgroundColor: Theme.colors.cardSurface,
+        borderRadius: Theme.radius.xl,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         padding: 18,
         gap: 8,
     },
     modalTitle: {
         fontSize: 16,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         marginBottom: 8,
         textAlign: 'center',
     },
@@ -949,29 +963,29 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         paddingHorizontal: 16,
         borderRadius: 12,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     categoryItemActive: {
-        borderColor: '#38BDF8',
+        borderColor: Theme.colors.fixed,
         borderWidth: 1,
     },
     categoryItemPaid: {
         opacity: 0.55,
-        backgroundColor: '#0F172A',
-        borderColor: '#1E293B',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderColor: Theme.colors.borderSubtle,
         borderWidth: 1,
     },
     categoryItemText: {
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         fontSize: 14,
         fontWeight: '600',
     },
     categoryItemTextActive: {
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         fontWeight: '800',
     },
     categoryItemTextPaid: {
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         textDecorationLine: 'line-through',
     },
     modalScrollView: {
@@ -981,7 +995,7 @@ const styles = StyleSheet.create({
     modalSectionLabel: {
         fontSize: 12,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
         marginTop: 10,
@@ -1014,22 +1028,22 @@ const styles = StyleSheet.create({
         borderRadius: 6,
     },
     paidBadgeText: {
-        color: '#10B981',
+        color: Theme.colors.statusSuccess,
         fontSize: 11,
         fontWeight: '700',
     },
     fixedCategoryMeta: {
         fontSize: 11,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         marginTop: 2,
     },
     fixedCategoryAmount: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
     },
     fixedCategoryAmountPaid: {
-        color: '#64748B',
+        color: Theme.colors.textMuted,
     },
     fixedLockHint: {
         flexDirection: 'row',
@@ -1047,7 +1061,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     fixedLockText: {
-        color: '#38BDF8',
+        color: Theme.colors.fixed,
         fontSize: 12,
         fontWeight: '700',
     },

@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, S
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 
+import { Theme } from '@/constants/theme';
 import { sendEmailVerification, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../services/firebase';
@@ -122,7 +123,7 @@ export default function WelcomeAuthScreen() {
                             <TextInput
                                 style={styles.input}
                                 placeholder="Correo electronico"
-                                placeholderTextColor="#64748B"
+                                placeholderTextColor={Theme.colors.textMuted}
                                 value={email}
                                 onChangeText={setEmail}
                                 keyboardType="email-address"
@@ -135,7 +136,7 @@ export default function WelcomeAuthScreen() {
                                 <TextInput
                                     style={styles.passwordInput}
                                     placeholder='Contraseña'
-                                    placeholderTextColor="#64748B"
+                                    placeholderTextColor={Theme.colors.textMuted}
                                     value={password}
                                     onChangeText={setPassword}
                                     autoCapitalize="none"
@@ -149,7 +150,7 @@ export default function WelcomeAuthScreen() {
                                     <Ionicons
                                         name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
                                         size={20}
-                                        color="#94A3B8"
+                                        color={Theme.colors.textSecondary}
                                     />
                                 </TouchableOpacity>
                             </View>
@@ -163,7 +164,7 @@ export default function WelcomeAuthScreen() {
                                 disabled={isLoading}
                             >
                                 {isLoading ? (
-                                    <ActivityIndicator color="#0B0F17" />
+                                    <ActivityIndicator color={Theme.colors.background} />
                                 ) : (
                                     <Text style={styles.primaryButtonText}>Continuar</Text>
                                 )}
@@ -195,7 +196,7 @@ export default function WelcomeAuthScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     keyboardView: {
         flex: 1,
@@ -205,7 +206,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingHorizontal: 24,
         paddingVertical: 40,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
         gap: 36,
     },
     container: {
@@ -220,7 +221,7 @@ const styles = StyleSheet.create({
     appTitle: {
         fontSize: 34,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         letterSpacing: 0.5,
 
     },
@@ -237,16 +238,16 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
     primaryButton: {
-        backgroundColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
         paddingVertical: 16,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         alignItems: 'center',
     },
     buttonDisabled: {
         opacity: 0.6,
     },
     primaryButtonText: {
-        color: '#0B0F17',
+        color: Theme.colors.background,
         fontSize: 16,
         fontWeight: '700',
     },
@@ -257,13 +258,13 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     input: {
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         paddingVertical: 14,
         paddingHorizontal: 16,
-        borderRadius: 12,
-        color: '#FFFFFF',
+        borderRadius: Theme.radius.md,
+        color: Theme.colors.textPrimary,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
         fontSize: 15,
     },
     eyeButton: {
@@ -272,17 +273,16 @@ const styles = StyleSheet.create({
     passwordInputWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
         paddingHorizontal: 16,
-        borderRadius: 12,
+        borderRadius: Theme.radius.md,
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     passwordInput: {
         flex: 1,
         paddingVertical: 14,
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 15,
     }
-
 });

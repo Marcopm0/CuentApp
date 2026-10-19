@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Theme } from '@/constants/theme';
 
 export default function WelcomeAuthScreen() {
     const router = useRouter();
@@ -52,12 +53,12 @@ export default function WelcomeAuthScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     container: {
         flex: 1,
         paddingHorizontal: 24,
-        backgroundColor: '#0B0F17',
+        backgroundColor: Theme.colors.background,
     },
     header: {
         alignItems: 'center',
@@ -67,19 +68,19 @@ const styles = StyleSheet.create({
     appTitle: {
         fontSize: 34,
         fontWeight: '800',
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         letterSpacing: 0.5,
     },
     tagline: {
         fontSize: 15,
-        color: '#94A3B8',
+        color: Theme.colors.textSecondary,
         textAlign: 'center',
         lineHeight: 22,
         paddingHorizontal: 16,
     },
     avisoText: {
         fontSize: 12,
-        color: '#64748B',
+        color: Theme.colors.textMuted,
         textAlign: 'center',
         lineHeight: 18,
         textDecorationLine: 'underline',
@@ -91,26 +92,26 @@ const styles = StyleSheet.create({
         gap: 24,
     },
     primaryButton: {
-        backgroundColor: '#38BDF8',
+        backgroundColor: Theme.colors.fixed,
         paddingVertical: 16,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         alignItems: 'center',
     },
     primaryButtonText: {
-        color: '#0B0F17',
+        color: Theme.colors.background,
         fontSize: 16,
         fontWeight: '700',
     },
     secondaryButton: {
-        backgroundColor: '#161F30',
+        backgroundColor: Theme.colors.cardSurface,
         paddingVertical: 16,
-        borderRadius: 14,
+        borderRadius: Theme.radius.lg,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#24324D',
+        borderColor: Theme.colors.border,
     },
     secondaryButtonText: {
-        color: '#FFFFFF',
+        color: Theme.colors.textPrimary,
         fontSize: 16,
         fontWeight: '600',
     },
@@ -120,4 +121,4 @@ const styles = StyleSheet.create({
         marginBottom: 20,
 
     },
-});
+});
