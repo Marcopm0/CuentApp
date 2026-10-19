@@ -16,18 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { auth, db } from '@/services/firebase';
-
-interface Transaction {
-    id: string;
-    type: 'income' | 'expense';
-    amount: number;
-    category: string;
-    description?: string;
-    targetBucket?: 'leisure' | 'buffer' | 'savings';
-    isFixedExpense?: boolean;
-    budgetId?: string | null;
-    createdAt?: any;
-}
+import { Transaction } from '@/types/database';
+import { getTransactionDate } from '@/utils/dates';
 
 const CATEGORIAS_FILTRO = [
     'Todas',
@@ -88,17 +78,7 @@ export default function HistorialScreen() {
     // 1. Orden cronológico descendente
     const historialOrdenado = useMemo(() => {
         return [...transactions].sort((a, b) => {
-            const timeA = a.createdAt?.toMillis
-                ? a.createdAt.toMillis()
-                : a.createdAt?.seconds
-                    ? a.createdAt.seconds * 1000
-                    : 0;
-            const timeB = b.createdAt?.toMillis
-                ? b.createdAt.toMillis()
-                : b.createdAt?.seconds
-                    ? b.createdAt.seconds * 1000
-                    : 0;
-            return timeB - timeA;
+            return getTransactionDate(b).getTime() - getTransactionDate(a).getTime();
         });
     }, [transactions]);
 
@@ -127,9 +107,8 @@ export default function HistorialScreen() {
 
     const hasActiveFilters = filterType !== 'all' || filterCategory !== 'Todas';
 
-    const formatFecha = (createdAt: any) => {
-        if (!createdAt) return 'Reciente';
-        const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+    const formatFecha = (tx: Transaction) => {
+        const date = getTransactionDate(tx);
         return date.toLocaleDateString('es-MX', {
             day: 'numeric',
             month: 'short',
@@ -150,13 +129,13 @@ export default function HistorialScreen() {
                     <View style={styles.subInfoRow}>
                         <Text style={styles.itemCat}>{item.category}</Text>
                         <Text style={styles.bulletDot}>•</Text>
-                        <Text style={styles.itemDate}>{formatFecha(item.createdAt)}</Text>
+                        <Text style={styles.itemDate}>{formatFecha(item)}</Text>
                     </View>
 
-                    {!isExpense && item.targetBucket && (
-                        <View style={styles.bucketPill}>
-                            <Text style={styles.bucketPillText}>
-                                Destino:{' '}
+                    {item.targetBucket && (
+                        <View style={[styles.bucketPill, item.targetBucket === 'buffer' && styles.bucketPillBuffer]}>
+                            <Text style={[styles.bucketPillText, item.targetBucket === 'buffer' && styles.bucketPillTextBuffer]}>
+                                {isExpense ? 'Origen: ' : 'Destino: '}
                                 {item.targetBucket === 'leisure'
                                     ? '🍿 Ocio'
                                     : item.targetBucket === 'buffer'
@@ -247,7 +226,7 @@ export default function HistorialScreen() {
                 ) : (
                     <FlatList
                         data={transaccionesFiltradas}
-                        keyExtractor={(item) => item.id}
+                        keyExtractor={(item) => item.id || ''}
                         renderItem={renderItem}
                         contentContainerStyle={styles.listContainer}
                         showsVerticalScrollIndicator={false}
@@ -517,10 +496,16 @@ const styles = StyleSheet.create({
         paddingVertical: 2,
         marginTop: 2,
     },
+    bucketPillBuffer: {
+        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    },
     bucketPillText: {
         fontSize: 10,
         fontWeight: '700',
         color: '#38BDF8',
+    },
+    bucketPillTextBuffer: {
+        color: '#F59E0B',
     },
     itemAmount: {
         fontSize: 16,

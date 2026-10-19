@@ -7,7 +7,6 @@ import {
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { auth, db } from '@/services/firebase';
-import type { UserProfile } from '@/types/database';
 
 export interface RegisterUserData {
     email: string;
@@ -15,9 +14,13 @@ export interface RegisterUserData {
     displayName: string;
 }
 
-export type FirestoreUserInsert = Omit<UserProfile, 'createdAt' | 'updatedAt'> & {
+export type FirestoreUserInsert = {
+    uid: string;
+    email: string;
+    displayName: string;
+    currency: string;
+    hasCompletedOnboarding: boolean;
     createdAt: ReturnType<typeof serverTimestamp>;
-    updatedAt: ReturnType<typeof serverTimestamp>;
 };
 
 export const registerUser = async ({
@@ -36,11 +39,9 @@ export const registerUser = async ({
         uid: user.uid,
         email: user.email ?? email.trim(),
         displayName: displayName.trim(),
-        photoURL: null,
         currency: 'MXN',
         hasCompletedOnboarding: false,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
     };
 
     await setDoc(doc(db, 'users', user.uid), newUserProfile);
@@ -49,8 +50,9 @@ export const registerUser = async ({
 };
 
 export const getAuthErrorMessage = (error: unknown): string => {
-    if (error instanceof FirebaseError) {
-        switch (error.code) {
+    const err = error as { code?: string; message?: string };
+    if (err && typeof err === 'object' && err.code) {
+        switch (err.code) {
             case 'auth/email-already-in-use':
                 return 'Este correo electrónico ya está registrado.';
             case 'auth/invalid-email':
@@ -60,8 +62,11 @@ export const getAuthErrorMessage = (error: unknown): string => {
             case 'auth/network-request-failed':
                 return 'Error de conexión. Verifica tu conexión a internet.';
             default:
-                return `Error al procesar la solicitud (${error.code}).`;
+                return `Error (${err.code}): ${err.message || 'Error al procesar la solicitud.'}`;
         }
+    }
+    if (error instanceof Error) {
+        return error.message;
     }
     return 'Ocurrió un error inesperado en el sistema.';
 };

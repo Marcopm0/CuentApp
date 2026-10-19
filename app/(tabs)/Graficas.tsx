@@ -1,6 +1,6 @@
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     RefreshControl,
@@ -15,7 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { auth, db } from '@/services/firebase';
 import { Budget, Transaction, UserProfile } from '@/types/database';
-import { DueBlock, getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
+import { deduplicateBudgets } from '@/utils/budgets';
+import { getTransactionDate } from '@/utils/dates';
+import { getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
 
 // Helper de formato de moneda estándar MXN
 const formatCurrency = (val: number = 0): string => {
@@ -93,20 +95,20 @@ export default function GraficasScreen() {
                 }
             );
 
-            // B. Presupuestos del mes
+            // B. Presupuestos permanentes (Opción B)
             const budgetsQuery = query(
                 collection(db, 'budgets'),
-                where('userId', '==', user.uid),
-                where('monthYear', '==', currentMonthYear)
+                where('userId', '==', user.uid)
             );
             unsubscribeBudgets = onSnapshot(
                 budgetsQuery,
                 (snapshot) => {
-                    const docs: Budget[] = snapshot.docs.map((d) => ({
+                    const rawDocs: Budget[] = snapshot.docs.map((d) => ({
                         id: d.id,
                         ...(d.data() as Omit<Budget, 'id'>),
                     }));
-                    setBudgets(docs);
+                    // Deduplicar presupuestos por categoría
+                    setBudgets(deduplicateBudgets(rawDocs));
                 },
                 (error) => {
                     console.error('Error al suscribir presupuestos en Graficas:', error);
@@ -158,6 +160,8 @@ export default function GraficasScreen() {
 
     // 4. Parámetros y Periodo Activo
     const payFrequency = (userProfile?.payFrequency as PayFrequency) || 'biweekly';
+    const isMonthlyPay = payFrequency === 'monthly';
+    const effectiveScope: 'cycle' | 'month' = isMonthlyPay ? 'month' : scope;
     const payDayOfWeek = typeof userProfile?.payDayOfWeek === 'number' ? userProfile.payDayOfWeek : 5;
     const monthlyIncome = Number(userProfile?.monthlyIncome) || 0;
     const savingsTarget = Number(userProfile?.savingsTarget) || 0;
@@ -202,19 +206,8 @@ export default function GraficasScreen() {
                     return t.periodKey === periodInfo.periodKey;
                 }
                 if (periodInfo.startDate && periodInfo.endDate) {
-                    const time = t.createdAt?.toMillis
-                        ? t.createdAt.toMillis()
-                        : t.createdAt?.seconds
-                            ? t.createdAt.seconds * 1000
-                            : t.date?.toMillis
-                                ? t.date.toMillis()
-                                : t.date?.seconds
-                                    ? t.date.seconds * 1000
-                                    : null;
-                    if (time) {
-                        const txDate = new Date(time);
-                        return txDate >= periodInfo.startDate && txDate <= periodInfo.endDate;
-                    }
+                    const txDate = getTransactionDate(t);
+                    return txDate >= periodInfo.startDate && txDate <= periodInfo.endDate;
                 }
                 return t.monthYear === currentMonthYear;
             } else {
@@ -222,29 +215,17 @@ export default function GraficasScreen() {
                 if (t.monthYear) {
                     return t.monthYear === currentMonthYear;
                 }
-                const time = t.createdAt?.toMillis
-                    ? t.createdAt.toMillis()
-                    : t.createdAt?.seconds
-                        ? t.createdAt.seconds * 1000
-                        : t.date?.toMillis
-                            ? t.date.toMillis()
-                            : t.date?.seconds
-                                ? t.date.seconds * 1000
-                                : null;
-                if (time) {
-                    const d = new Date(time);
-                    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    return ym === currentMonthYear;
-                }
-                return false;
+                const d = getTransactionDate(t);
+                const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                return ym === currentMonthYear;
             }
         };
     }, [periodInfo, currentMonthYear]);
 
     // Transacciones filtradas para el scope activo
     const scopedTransactions = useMemo(() => {
-        return transactions.filter((t) => isInScope(t, scope));
-    }, [transactions, isInScope, scope]);
+        return transactions.filter((t) => isInScope(t, effectiveScope));
+    }, [transactions, isInScope, effectiveScope]);
 
     // ─────────────────────────────────────────────────────────────
     // CÁLCULOS: MÓDULO 1 (Resumen Global y Balance)
@@ -258,7 +239,7 @@ export default function GraficasScreen() {
     } = useMemo(() => {
         // Ingresos:
         // Base presupuestada (nómina del ciclo o mensual)
-        const baseIncome = scope === 'cycle' ? amountPerPeriod : (monthlyIncome || amountPerPeriod * cycleDivisor);
+        const baseIncome = effectiveScope === 'cycle' ? amountPerPeriod : (monthlyIncome || amountPerPeriod * cycleDivisor);
 
         // Sueldos registrados efectivamente en transacciones para el periodo
         const salaryIncomes = scopedTransactions
@@ -274,30 +255,17 @@ export default function GraficasScreen() {
         const ingresos = Math.max(baseIncome, salaryIncomes) + extraIncomes;
 
         // Fijos Cubiertos:
-        // Se calcula a partir de los pagos efectuados en presupuestos fijos y las transacciones de gastos fijos
+        // Se calcula reactivamente a partir de las transacciones de gastos fijos del periodo (Opción B)
         let fijosPagados = 0;
-        if (scope === 'cycle') {
-            // Pagos en los bloques activos de este ciclo
-            const fijosBudgetsCycle = budgets
-                .filter((b) => b.isFixedExpense && b.dueBlock && periodInfo.activeBlocks.includes(b.dueBlock))
-                .reduce((acc, b) => acc + (Number(b.currentSpent) || 0), 0);
-
-            const fijosTxsCycle = scopedTransactions
+        if (effectiveScope === 'cycle') {
+            fijosPagados = scopedTransactions
                 .filter((t) => t.type === 'expense' && (t.isFixedExpense || t.category === 'Gasto Fijo'))
                 .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-
-            fijosPagados = Math.max(fijosBudgetsCycle, fijosTxsCycle);
         } else {
             // Mes completo
-            const fijosBudgetsMonth = budgets
-                .filter((b) => b.isFixedExpense)
-                .reduce((acc, b) => acc + (Number(b.currentSpent) || 0), 0);
-
-            const fijosTxsMonth = scopedTransactions
+            fijosPagados = scopedTransactions
                 .filter((t) => t.type === 'expense' && (t.isFixedExpense || t.category === 'Gasto Fijo'))
                 .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-
-            fijosPagados = Math.max(fijosBudgetsMonth, fijosTxsMonth);
         }
 
         // Gastos Variables consumidos en el periodo
@@ -315,7 +283,7 @@ export default function GraficasScreen() {
             fijosCubiertos: fijosPagados,
             gastosVariablesConsumidos: variables,
         };
-    }, [scope, amountPerPeriod, monthlyIncome, cycleDivisor, scopedTransactions, budgets, periodInfo]);
+    }, [effectiveScope, amountPerPeriod, monthlyIncome, cycleDivisor, scopedTransactions, budgets, periodInfo]);
 
     // ─────────────────────────────────────────────────────────────
     // CÁLCULOS: MÓDULO 2 (Distribución de Bolsas Maestras)
@@ -331,7 +299,7 @@ export default function GraficasScreen() {
         pctOcio,
         pctBuffer,
     } = useMemo(() => {
-        const isCycle = scope === 'cycle';
+        const isCycle = effectiveScope === 'cycle';
         const div = isCycle ? cycleDivisor : 1;
 
         // 1. 🏠 Gastos Fijos
@@ -382,7 +350,7 @@ export default function GraficasScreen() {
             pctBuffer: pBuffer,
         };
     }, [
-        scope,
+        effectiveScope,
         cycleDivisor,
         userProfile,
         isFirstCycle,
@@ -435,27 +403,25 @@ export default function GraficasScreen() {
     // CÁLCULOS: MÓDULO 4 (Salud del Presupuesto: Planeado vs Consumido)
     // ─────────────────────────────────────────────────────────────
     const saludPresupuesto = useMemo(() => {
-        const isCycle = scope === 'cycle';
+        const isCycle = effectiveScope === 'cycle';
         const div = isCycle ? cycleDivisor : 1;
 
-        // A. Compromisos Fijos
-        let compromisoPresupuestado = 0;
-        if (isCycle) {
-            const blocks = periodInfo.activeBlocks;
-            const compromisosBloque = budgets
-                .filter((b) => b.isFixedExpense && b.dueBlock && blocks.includes(b.dueBlock))
-                .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+        // A. Compromisos Fijos anclados SIEMPRE a escala mensual (Punto 1)
+        const compromisoPresupuestado = budgets
+            .filter((b) => b.isFixedExpense)
+            .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
 
-            compromisoPresupuestado = compromisosBloque > 0
-                ? compromisosBloque
-                : (budgets.filter((b) => b.isFixedExpense).reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0) / div);
-        } else {
-            compromisoPresupuestado = budgets
-                .filter((b) => b.isFixedExpense)
-                .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
-        }
+        const compromisoPagado = transactions
+            .filter((t) => {
+                if (t.type !== 'expense') return false;
+                if (!t.isFixedExpense && t.category !== 'Gasto Fijo') return false;
+                if (t.monthYear) return t.monthYear === currentMonthYear;
+                const d = getTransactionDate(t);
+                const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                return ym === currentMonthYear;
+            })
+            .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-        const compromisoPagado = fijosCubiertos;
         const compromisoPct = compromisoPresupuestado > 0
             ? Math.min(100, (compromisoPagado / compromisoPresupuestado) * 100)
             : 100;
@@ -466,10 +432,49 @@ export default function GraficasScreen() {
             .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
         const limiteOcio = ocioMaster + extraOcio;
-        const ocioConsumido = gastosVariablesConsumidos;
+        // Solo computar como ocio las transacciones variables que no estén asignadas a colchón
+        const ocioConsumido = scopedTransactions
+            .filter((t) => t.type === 'expense' && !t.isFixedExpense && t.category !== 'Gasto Fijo' && t.targetBucket !== 'buffer')
+            .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
         const ocioPct = limiteOcio > 0 ? (ocioConsumido / limiteOcio) * 100 : 0;
-        const ocioAgotado = ocioConsumido > limiteOcio;
+        const ocioAgotado = limiteOcio > 0 ? ocioConsumido >= limiteOcio : false;
         const ocioRestante = Math.max(0, limiteOcio - ocioConsumido);
+
+        // Indicador de Ritmo Temporal (Pacing - Punto 2)
+        const now = new Date();
+        const totalDaysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        let diaActual = 1;
+        let diasTotales = 30;
+
+        if (effectiveScope === 'month' || payFrequency === 'monthly') {
+            diaActual = Math.min(totalDaysInMonth, Math.max(1, now.getDate()));
+            diasTotales = totalDaysInMonth;
+        } else if (payFrequency === 'weekly') {
+            const targetDay = typeof payDayOfWeek === 'number' && payDayOfWeek >= 0 && payDayOfWeek <= 6 ? payDayOfWeek : 5;
+            const currentDayOfWeek = now.getDay();
+            const diff = (currentDayOfWeek - targetDay + 7) % 7;
+            diaActual = Math.min(7, Math.max(1, diff + 1));
+            diasTotales = 7;
+        } else {
+            // biweekly (quincenal)
+            const day = now.getDate();
+            if (day <= 15) {
+                diaActual = Math.min(15, Math.max(1, day));
+                diasTotales = 15;
+            } else {
+                diaActual = Math.min(totalDaysInMonth - 15, Math.max(1, day - 15));
+                diasTotales = totalDaysInMonth - 15;
+            }
+        }
+
+        const pacingLegend = limiteOcio > 0
+            ? `Vas gastando ${formatCurrency(ocioConsumido)} de ${formatCurrency(limiteOcio)} al día ${diaActual} de ${diasTotales}`
+            : `Vas gastando ${formatCurrency(ocioConsumido)} al día ${diaActual} de ${diasTotales}`;
+
+        const pctTiempo = diasTotales > 0 ? (diaActual / diasTotales) * 100 : 0;
+        const isLimitReached = ocioAgotado;
+        const isAccelerated = !isLimitReached && limiteOcio > 0 && (ocioPct > pctTiempo + 5 || ocioPct >= 80);
+        const isUnderControl = !isLimitReached && !isAccelerated;
 
         // C. Colchón / Reserva de Imprevistos
         const extraBuffer = scopedTransactions
@@ -484,12 +489,20 @@ export default function GraficasScreen() {
             .filter((t) => t.type === 'expense' && t.targetBucket === 'buffer')
             .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
+        const totalConsumoBuffer = gastoExcedenteOcio + gastosConBucketBuffer;
         const bufferConsumido = Math.min(
             bufferTotalInicial,
-            gastoExcedenteOcio + gastosConBucketBuffer
+            totalConsumoBuffer
         );
-        const bufferIntacto = Math.max(0, bufferTotalInicial - bufferConsumido);
+        const bufferIntacto = Math.max(0, bufferTotalInicial - totalConsumoBuffer);
         const bufferPctIntacto = bufferTotalInicial > 0 ? (bufferIntacto / bufferTotalInicial) * 100 : 0;
+
+        // Estados del Colchón homologados con el Home (umbral 25% y 15%)
+        const userHasBuffer = bufferTotalInicial > 0;
+        const isBufferOverdrawn = totalConsumoBuffer > bufferTotalInicial;
+        const isBufferCritical = isBufferOverdrawn || (userHasBuffer && (bufferPctIntacto < 15 || ocioAgotado));
+        const isBufferWarning = !isBufferCritical && userHasBuffer && bufferConsumido > 0 && bufferPctIntacto < 25;
+        const isBufferActiveHealthy = !isBufferCritical && !isBufferWarning && userHasBuffer && bufferConsumido > 0 && bufferPctIntacto >= 25 && !ocioAgotado;
 
         return {
             fijos: {
@@ -503,23 +516,34 @@ export default function GraficasScreen() {
                 ocioPct,
                 ocioAgotado,
                 ocioRestante,
+                diaActual,
+                diasTotales,
+                pacingLegend,
+                isLimitReached,
+                isAccelerated,
+                isUnderControl,
             },
             buffer: {
                 bufferTotalInicial,
                 bufferConsumido,
                 bufferIntacto,
                 bufferPctIntacto,
+                isBufferActiveHealthy,
+                isBufferWarning,
+                isBufferCritical,
             },
         };
     }, [
-        scope,
+        effectiveScope,
         cycleDivisor,
         periodInfo,
         budgets,
-        fijosCubiertos,
+        transactions,
+        currentMonthYear,
+        payFrequency,
+        payDayOfWeek,
         scopedTransactions,
         ocioMaster,
-        gastosVariablesConsumidos,
         bufferMaster,
     ]);
 
@@ -546,7 +570,7 @@ export default function GraficasScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <StatusBar barStyle="light-content" backgroundColor="#0B0F17" />
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
@@ -575,59 +599,73 @@ export default function GraficasScreen() {
                     <View style={styles.periodBadge}>
                         <Ionicons name="calendar-outline" size={13} color="#38BDF8" />
                         <Text style={styles.periodBadgeText}>
-                            {scope === 'cycle' ? periodInfo.label : currentMonthLabel}
+                            {effectiveScope === 'cycle' ? periodInfo.label : currentMonthLabel}
                         </Text>
                     </View>
                 </View>
 
-                {/* Tabs Segmentados: Este Ciclo vs. Mes Completo */}
-                <View style={styles.temporalToggleContainer}>
-                    <TouchableOpacity
-                        style={[
-                            styles.temporalTab,
-                            scope === 'cycle' && styles.temporalTabActive,
-                        ]}
-                        onPress={() => setScope('cycle')}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons
-                            name="flash-outline"
-                            size={14}
-                            color={scope === 'cycle' ? '#0B0F17' : '#94A3B8'}
-                        />
-                        <Text
+                {/* Tabs Segmentados: Solo si la frecuencia es semanal o quincenal. Si es mensual, se muestra únicamente la vista consolidada */}
+                {!isMonthlyPay ? (
+                    <View style={styles.temporalToggleContainer}>
+                        <TouchableOpacity
                             style={[
-                                styles.temporalTabText,
-                                scope === 'cycle' && styles.temporalTabTextActive,
+                                styles.temporalTab,
+                                effectiveScope === 'cycle' && styles.temporalTabActive,
                             ]}
+                            onPress={() => setScope('cycle')}
+                            activeOpacity={0.7}
                         >
-                            Este Ciclo ({periodInfo.label})
-                        </Text>
-                    </TouchableOpacity>
+                            <Ionicons
+                                name="flash-outline"
+                                size={14}
+                                color={effectiveScope === 'cycle' ? '#0B0F17' : '#94A3B8'}
+                            />
+                            <Text
+                                style={[
+                                    styles.temporalTabText,
+                                    effectiveScope === 'cycle' && styles.temporalTabTextActive,
+                                ]}
+                            >
+                                Este Ciclo ({periodInfo.label})
+                            </Text>
+                        </TouchableOpacity>
 
-                    <TouchableOpacity
-                        style={[
-                            styles.temporalTab,
-                            scope === 'month' && styles.temporalTabActive,
-                        ]}
-                        onPress={() => setScope('month')}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons
-                            name="calendar"
-                            size={14}
-                            color={scope === 'month' ? '#0B0F17' : '#94A3B8'}
-                        />
-                        <Text
+                        <TouchableOpacity
                             style={[
-                                styles.temporalTabText,
-                                scope === 'month' && styles.temporalTabTextActive,
+                                styles.temporalTab,
+                                effectiveScope === 'month' && styles.temporalTabActive,
                             ]}
+                            onPress={() => setScope('month')}
+                            activeOpacity={0.7}
                         >
-                            Mes Completo
+                            <Ionicons
+                                name="calendar"
+                                size={14}
+                                color={effectiveScope === 'month' ? '#0B0F17' : '#94A3B8'}
+                            />
+                            <Text
+                                style={[
+                                    styles.temporalTabText,
+                                    effectiveScope === 'month' && styles.temporalTabTextActive,
+                                ]}
+                            >
+                                Mes Completo
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : (
+                    <View style={styles.monthlyConsolidatedCard}>
+                        <View style={styles.monthlyConsolidatedBadge}>
+                            <Ionicons name="calendar" size={15} color="#38BDF8" />
+                            <Text style={styles.monthlyConsolidatedTitle}>
+                                Vista Consolidada: Mes Completo
+                            </Text>
+                        </View>
+                        <Text style={styles.monthlyConsolidatedSubtitle}>
+                            {currentMonthLabel}
                         </Text>
-                    </TouchableOpacity>
-                </View>
+                    </View>
+                )}
 
                 {/* ─────────────────────────────────────────────────────────────
             MÓDULO 1: CABECERA Y RESUMEN GLOBAL (BALANCE DE FLUJO)
@@ -693,7 +731,7 @@ export default function GraficasScreen() {
                                 +{formatCurrency(totalIngresos)}
                             </Text>
                             <Text style={styles.balanceItemSub}>
-                                {scope === 'cycle' ? 'Sueldo ciclo + extras' : 'Sueldo mes + extras'}
+                                {effectiveScope === 'cycle' ? 'Sueldo ciclo + extras' : 'Sueldo mes + extras'}
                             </Text>
                         </View>
 
@@ -883,13 +921,6 @@ export default function GraficasScreen() {
                                 </Text>
                             </View>
                         </View>
-                        {totalGastosScope > 0 && (
-                            <View style={styles.countBadge}>
-                                <Text style={styles.countBadgeText}>
-                                    {topCategorias.length} cats
-                                </Text>
-                            </View>
-                        )}
                     </View>
 
                     {topCategorias.length === 0 ? (
@@ -913,11 +944,6 @@ export default function GraficasScreen() {
                                                 <Text style={styles.categoryNameText} numberOfLines={1}>
                                                     {item.category}
                                                 </Text>
-                                                <View style={styles.categoryCountBadge}>
-                                                    <Text style={styles.categoryCountBadgeText}>
-                                                        {item.count} ops
-                                                    </Text>
-                                                </View>
                                             </View>
 
                                             <View style={styles.categoryAmountRow}>
@@ -973,7 +999,7 @@ export default function GraficasScreen() {
                             <View style={styles.healthItemTitleRow}>
                                 <Text style={styles.healthItemTitle}>🏠 Compromisos Fijos</Text>
                                 <Text style={styles.healthItemSub}>
-                                    Obligaciones esenciales del periodo
+                                    Obligaciones esenciales del mes
                                 </Text>
                             </View>
                             <View
@@ -1041,9 +1067,9 @@ export default function GraficasScreen() {
                             <View
                                 style={[
                                     styles.healthBadge,
-                                    saludPresupuesto.ocio.ocioAgotado
+                                    saludPresupuesto.ocio.isLimitReached
                                         ? styles.healthBadgeDanger
-                                        : saludPresupuesto.ocio.ocioPct >= 75
+                                        : saludPresupuesto.ocio.isAccelerated
                                             ? styles.healthBadgeWarning
                                             : styles.healthBadgeSuccess,
                                 ]}
@@ -1051,17 +1077,17 @@ export default function GraficasScreen() {
                                 <Text
                                     style={[
                                         styles.healthBadgeText,
-                                        saludPresupuesto.ocio.ocioAgotado
+                                        saludPresupuesto.ocio.isLimitReached
                                             ? styles.healthTextDanger
-                                            : saludPresupuesto.ocio.ocioPct >= 75
+                                            : saludPresupuesto.ocio.isAccelerated
                                                 ? styles.healthTextWarning
                                                 : styles.healthTextSuccess,
                                     ]}
                                 >
-                                    {saludPresupuesto.ocio.ocioAgotado
-                                        ? '⚠️ Agotado'
-                                        : saludPresupuesto.ocio.ocioPct >= 75
-                                            ? '⚡ Precaución'
+                                    {saludPresupuesto.ocio.isLimitReached
+                                        ? '⚠️ Límite alcanzado'
+                                        : saludPresupuesto.ocio.isAccelerated
+                                            ? '⚡ Acelerado'
                                             : '✅ Bajo control'}
                                 </Text>
                             </View>
@@ -1084,15 +1110,20 @@ export default function GraficasScreen() {
                             </Text>
                         </View>
 
+                        {/* Leyenda de Ritmo Temporal (Pacing) */}
+                        <Text style={styles.healthPacingLegend}>
+                            {saludPresupuesto.ocio.pacingLegend}
+                        </Text>
+
                         <View style={styles.healthTrackBar}>
                             <View
                                 style={[
                                     styles.healthFillBar,
                                     {
                                         width: `${Math.min(100, saludPresupuesto.ocio.ocioPct)}%`,
-                                        backgroundColor: saludPresupuesto.ocio.ocioAgotado
+                                        backgroundColor: saludPresupuesto.ocio.isLimitReached
                                             ? '#EF4444'
-                                            : saludPresupuesto.ocio.ocioPct >= 75
+                                            : saludPresupuesto.ocio.isAccelerated
                                                 ? '#F59E0B'
                                                 : '#10B981',
                                     },
@@ -1117,9 +1148,9 @@ export default function GraficasScreen() {
                                     styles.healthBadge,
                                     saludPresupuesto.buffer.bufferTotalInicial === 0
                                         ? styles.healthBadgePending
-                                        : saludPresupuesto.buffer.bufferConsumido === 0
+                                        : saludPresupuesto.buffer.bufferConsumido === 0 || saludPresupuesto.buffer.isBufferActiveHealthy
                                             ? styles.healthBadgeSuccess
-                                            : saludPresupuesto.buffer.bufferIntacto > 0
+                                            : saludPresupuesto.buffer.isBufferWarning
                                                 ? styles.healthBadgeWarning
                                                 : styles.healthBadgeDanger,
                                 ]}
@@ -1129,9 +1160,9 @@ export default function GraficasScreen() {
                                         styles.healthBadgeText,
                                         saludPresupuesto.buffer.bufferTotalInicial === 0
                                             ? styles.healthTextPending
-                                            : saludPresupuesto.buffer.bufferConsumido === 0
+                                            : saludPresupuesto.buffer.bufferConsumido === 0 || saludPresupuesto.buffer.isBufferActiveHealthy
                                                 ? styles.healthTextSuccess
-                                                : saludPresupuesto.buffer.bufferIntacto > 0
+                                                : saludPresupuesto.buffer.isBufferWarning
                                                     ? styles.healthTextWarning
                                                     : styles.healthTextDanger,
                                     ]}
@@ -1140,9 +1171,13 @@ export default function GraficasScreen() {
                                         ? 'Sin asignar'
                                         : saludPresupuesto.buffer.bufferConsumido === 0
                                             ? '🛡️ 100% Intacto'
-                                            : saludPresupuesto.buffer.bufferIntacto > 0
-                                                ? `⚠️ En reserva (-${formatCurrency(saludPresupuesto.buffer.bufferConsumido)})`
-                                                : ' Agotado'}
+                                            : saludPresupuesto.buffer.isBufferActiveHealthy
+                                                ? `🛡️ Reserva Activa (-${formatCurrency(saludPresupuesto.buffer.bufferConsumido)})`
+                                                : saludPresupuesto.buffer.isBufferWarning
+                                                    ? `⚠️ Reserva Baja (-${formatCurrency(saludPresupuesto.buffer.bufferConsumido)})`
+                                                    : saludPresupuesto.buffer.bufferIntacto <= 0
+                                                        ? '🚨 Agotado'
+                                                        : '🔴 En Peligro'}
                                 </Text>
                             </View>
                         </View>
@@ -1166,9 +1201,9 @@ export default function GraficasScreen() {
                                         backgroundColor:
                                             saludPresupuesto.buffer.bufferTotalInicial === 0
                                                 ? '#475569'
-                                                : saludPresupuesto.buffer.bufferConsumido === 0
+                                                : saludPresupuesto.buffer.bufferConsumido === 0 || saludPresupuesto.buffer.isBufferActiveHealthy
                                                     ? '#10B981'
-                                                    : saludPresupuesto.buffer.bufferIntacto > 0
+                                                    : saludPresupuesto.buffer.isBufferWarning
                                                         ? '#F59E0B'
                                                         : '#EF4444',
                                     },
@@ -1177,9 +1212,6 @@ export default function GraficasScreen() {
                         </View>
                     </View>
                 </View>
-
-                {/* Espacio inferior de respiro para que no choque con la TabBar */}
-                <View style={styles.bottomSpacer} />
             </ScrollView>
         </SafeAreaView>
     );
@@ -1206,9 +1238,10 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     scrollContent: {
+
         paddingHorizontal: 16,
         paddingTop: 12,
-        paddingBottom: 24,
+        paddingBottom: 110,
         gap: 16,
     },
 
@@ -1279,6 +1312,32 @@ const styles = StyleSheet.create({
     temporalTabTextActive: {
         color: '#0B0F17',
         fontWeight: '800',
+    },
+    monthlyConsolidatedCard: {
+        backgroundColor: '#161F30',
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderColor: '#24324D',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    monthlyConsolidatedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+    },
+    monthlyConsolidatedTitle: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#F8FAFC',
+    },
+    monthlyConsolidatedSubtitle: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#38BDF8',
     },
 
     // Tarjeta Modular Base
@@ -1507,17 +1566,6 @@ const styles = StyleSheet.create({
     },
 
     // Módulo 3: Top Gastos
-    countBadge: {
-        backgroundColor: '#24324D',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 8,
-    },
-    countBadgeText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#94A3B8',
-    },
     emptyStateContainer: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -1553,25 +1601,14 @@ const styles = StyleSheet.create({
     categoryNameRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
         flex: 1,
+        marginRight: 8,
     },
     categoryNameText: {
         fontSize: 14,
         fontWeight: '700',
         color: '#F8FAFC',
-        maxWidth: '70%',
-    },
-    categoryCountBadge: {
-        backgroundColor: '#24324D',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
-    },
-    categoryCountBadgeText: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#94A3B8',
+        flexShrink: 1,
     },
     categoryAmountRow: {
         flexDirection: 'row',
@@ -1681,6 +1718,12 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#94A3B8',
     },
+    healthPacingLegend: {
+        fontSize: 12,
+        fontWeight: '500',
+        color: '#94A3B8',
+        marginTop: -2,
+    },
     healthTrackBar: {
         height: 8,
         borderRadius: 4,
@@ -1690,9 +1733,5 @@ const styles = StyleSheet.create({
     healthFillBar: {
         height: '100%',
         borderRadius: 4,
-    },
-
-    bottomSpacer: {
-        height: 20,
     },
 });

@@ -1,4 +1,5 @@
 // services/onboardingService.ts
+import { getLocalDateString } from '@/utils/dates';
 import { DueBlock, getPeriodInfo, PayFrequency } from '@/utils/periods';
 import {
     collection,
@@ -44,6 +45,7 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
 
     const batch = writeBatch(db);
     const now = new Date();
+    const todayStr = getLocalDateString(now);
     const monthYear = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const currentPeriod = getPeriodInfo(data.payFrequency, data.payDayOfWeek);
 
@@ -62,46 +64,44 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
             targetBucket: 'leisure',
             periodKey: currentPeriod.periodKey,
             monthYear,
-            date: serverTimestamp(),
+            date: todayStr,
             createdAt: serverTimestamp(),
             isShared: false,
         });
     }
 
-    // 2. Crear un presupuesto específico para CADA gasto fijo desglosado
+    // 2. Crear un presupuesto maestro permanente para CADA gasto fijo desglosado (Opción B)
     data.fixedExpenses.forEach((expense) => {
         if (expense.amount > 0) {
             const cleanCategory = sanitizeBudgetId(expense.name);
-            const budgetDocId = `${currentUser.uid}_${cleanCategory}_${monthYear}`;
+            const budgetDocId = `${currentUser.uid}_${cleanCategory}`;
             const budgetRef = doc(db, 'budgets', budgetDocId);
 
             batch.set(budgetRef, {
                 id: budgetDocId,
                 userId: currentUser.uid,
+                name: expense.name,
                 category: expense.name, // Mantiene el nombre legible original para mostrar en la interfaz
                 limitAmount: expense.amount,
-                currentSpent: 0,
-                monthYear,
-                isFixedExpense: true,
                 dueBlock: expense.dueBlock || 'mid', // Bloque de vencimiento (start | mid | end)
+                isFixedExpense: true,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
             });
         }
     });
 
-    // 3. Crear el presupuesto para Ocio / Gustos personales
+    // 3. Crear el presupuesto maestro permanente para Ocio / Gustos personales
     if (data.leisureBudget > 0) {
-        const leisureDocId = `${currentUser.uid}_ocio_${monthYear}`;
+        const leisureDocId = `${currentUser.uid}_ocio`;
         const leisureRef = doc(db, 'budgets', leisureDocId);
 
         batch.set(leisureRef, {
             id: leisureDocId,
             userId: currentUser.uid,
+            name: 'Ocio y Deseos',
             category: 'Ocio y Deseos',
             limitAmount: data.leisureBudget,
-            currentSpent: 0,
-            monthYear,
             isFixedExpense: false,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),

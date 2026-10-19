@@ -4,11 +4,10 @@ import {
     addDoc,
     collection,
     doc,
+    getDoc,
     getDocs,
-    increment,
     query,
     serverTimestamp,
-    updateDoc,
     where,
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
@@ -31,15 +30,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { auth, db } from '@/services/firebase';
-
-interface Budget {
-    id: string;
-    category: string;
-    limitAmount: number;
-    currentSpent: number;
-    isFixedExpense: boolean;
-    dueBlock?: string;
-}
+import { Budget, Transaction } from '@/types/database';
+import { deduplicateBudgets } from '@/utils/budgets';
+import { getLocalDateString } from '@/utils/dates';
 
 const CATEGORIAS_GASTO_VARIABLES = [
     '🍿 Ocio',
@@ -76,50 +69,135 @@ export default function AgregarRegistroScreen() {
     // Destino del ingreso cuando entra dinero extra
     const [targetBucket, setTargetBucket] = useState<'leisure' | 'buffer' | 'savings'>('leisure');
 
+    // Origen del gasto diario/variable (Detalle 1: Ocio vs Colchón)
+    const [expenseTargetBucket, setExpenseTargetBucket] = useState<'leisure' | 'buffer'>('leisure');
+
+    // Registro de montos liquidados de gastos fijos este mes (Detalle 2)
+    const [paidFixedMap, setPaidFixedMap] = useState<Record<string, number>>({});
+
     // Mes en curso YYYY-MM
     const currentMonthYear = useMemo(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }, []);
 
-    // Cargar presupuestos activos de Firestore para el monthYear actual
+    // Cargar presupuestos activos y gastos fijos ya liquidados para el monthYear actual
     useEffect(() => {
         const user = auth.currentUser;
         if (!user) return;
 
-        const fetchBudgets = async () => {
+        const fetchBudgetsAndTxs = async () => {
             try {
-                const q = query(
+                // 1. Obtener presupuestos permanentes (Opción B)
+                const qBudgets = query(
                     collection(db, 'budgets'),
-                    where('userId', '==', user.uid),
-                    where('monthYear', '==', currentMonthYear)
+                    where('userId', '==', user.uid)
                 );
-                const snapshot = await getDocs(q);
-                const docs: Budget[] = snapshot.docs.map((d) => ({
+                const snapshotBudgets = await getDocs(qBudgets);
+                const rawDocs: Budget[] = snapshotBudgets.docs.map((d) => ({
                     id: d.id,
                     ...(d.data() as Omit<Budget, 'id'>),
                 }));
-                setBudgets(docs);
+                // Deduplicar presupuestos por categoría
+                setBudgets(deduplicateBudgets(rawDocs));
+
+                // 2. Obtener transacciones de gastos fijos del mes actual para cruzar pagos
+                const qTxs = query(
+                    collection(db, 'transactions'),
+                    where('userId', '==', user.uid),
+                    where('monthYear', '==', currentMonthYear),
+                    where('type', '==', 'expense'),
+                    where('isFixedExpense', '==', true)
+                );
+                const snapshotTxs = await getDocs(qTxs);
+                const paidMap: Record<string, number> = {};
+                snapshotTxs.docs.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    const amt = Number(data.amount) || 0;
+                    if (data.budgetId) {
+                        paidMap[data.budgetId] = (paidMap[data.budgetId] || 0) + amt;
+                    }
+                    if (data.category) {
+                        paidMap[data.category] = (paidMap[data.category] || 0) + amt;
+                    }
+                });
+                setPaidFixedMap(paidMap);
             } catch (error) {
-                console.error('Error al cargar presupuestos activos:', error);
+                console.error('Error al cargar presupuestos activos y fijos pagados:', error);
             }
         };
 
-        fetchBudgets();
+        fetchBudgetsAndTxs();
     }, [currentMonthYear]);
+
+    // Saldo pendiente del presupuesto fijo actualmente seleccionado (calculado dinámicamente - Opción B)
+    const pendingFixedAmount = useMemo(() => {
+        if (!selectedBudget || !selectedBudget.isFixedExpense) return null;
+        const spentFromTxs = Math.max(
+            paidFixedMap[selectedBudget.id] || 0,
+            paidFixedMap[selectedBudget.category] || 0
+        );
+        const limit = Number(selectedBudget.limitAmount || 0);
+        return Math.max(0, limit - spentFromTxs);
+    }, [selectedBudget, paidFixedMap]);
 
     const handleToggleType = () => {
         const nextType = !isExpense;
         setIsExpense(nextType);
         setSelectedBudget(null);
+        setExpenseTargetBucket('leisure');
+        setTargetBucket('leisure');
         setCategory(nextType ? CATEGORIAS_GASTO_VARIABLES[0] : CATEGORIAS_INGRESO[0]);
+    };
+
+    // Controlador y sanitizador de entrada de monto
+    const handleAmountChange = (text: string) => {
+        let cleaned = text.replace(',', '.');
+        cleaned = cleaned.replace(/[^0-9.]/g, '');
+        const parts = cleaned.split('.');
+        if (parts.length > 2) {
+            cleaned = parts[0] + '.' + parts.slice(1).join('');
+        }
+        if (parts[1] && parts[1].length > 2) {
+            cleaned = parts[0] + '.' + parts[1].slice(0, 2);
+        }
+
+        const num = parseFloat(cleaned);
+        // Punto 2: Límite máximo de $100,000 MXN para evitar descuidos tipográficos
+        if (!isNaN(num) && num > 100000) {
+            Alert.alert('Límite de monto', 'El monto máximo por transacción es de $100,000 MXN.');
+            return;
+        }
+
+        // Punto 1: Bloquear si excede el saldo pendiente en compromisos fijos
+        if (selectedBudget?.isFixedExpense && pendingFixedAmount !== null) {
+            if (!isNaN(num) && num > pendingFixedAmount) {
+                Alert.alert(
+                    'Monto excede saldo pendiente',
+                    `El saldo pendiente de "${selectedBudget.category}" es de $${pendingFixedAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN. No puedes ingresar una cifra mayor.`
+                );
+                const capped = pendingFixedAmount > 0
+                    ? (pendingFixedAmount % 1 === 0 ? pendingFixedAmount.toString() : pendingFixedAmount.toFixed(2))
+                    : '0';
+                setAmount(capped);
+                return;
+            }
+        }
+
+        setAmount(cleaned);
     };
 
     const handleSave = async () => {
         const numericAmount = parseFloat(amount);
 
+        // Punto 2: Validación de monto mínimo > $0 y límite superior
         if (isNaN(numericAmount) || numericAmount <= 0) {
-            Alert.alert('Monto requerido', 'Por favor ingresa una cantidad válida mayor a $0.');
+            Alert.alert('Monto inválido', 'Por favor ingresa una cantidad válida mayor a $0.');
+            return;
+        }
+
+        if (numericAmount > 100000) {
+            Alert.alert('Límite excedido', 'El monto máximo por transacción es de $100,000 MXN.');
             return;
         }
 
@@ -136,6 +214,64 @@ export default function AgregarRegistroScreen() {
             const isFixed = isExpense && selectedBudget !== null && selectedBudget.isFixedExpense === true;
             const targetBudgetId = isFixed && selectedBudget ? selectedBudget.id : null;
 
+            // Punto 1: Validación estricta en Firestore antes de guardar (Opción B dinámica)
+            if (isFixed && targetBudgetId) {
+                const budgetRef = doc(db, 'budgets', targetBudgetId);
+                const budgetSnap = await getDoc(budgetRef);
+                if (!budgetSnap.exists()) {
+                    Alert.alert('Error', 'El compromiso presupuestal seleccionado ya no existe.');
+                    setLoading(false);
+                    return;
+                }
+
+                const bData = budgetSnap.data();
+                const freshLimit = Number(bData.limitAmount || 0);
+
+                // Consulta en vivo a transacciones del mes en curso para asegurar que no se haya liquidado concurrentemente
+                const qTxsCheck = query(
+                    collection(db, 'transactions'),
+                    where('userId', '==', user.uid),
+                    where('monthYear', '==', currentMonthYear),
+                    where('type', '==', 'expense'),
+                    where('isFixedExpense', '==', true)
+                );
+                const snapTxsCheck = await getDocs(qTxsCheck);
+                let freshSpentTxs = 0;
+                snapTxsCheck.docs.forEach((d) => {
+                    const data = d.data();
+                    if (data.budgetId === targetBudgetId || data.category === category) {
+                        freshSpentTxs += Number(data.amount || 0);
+                    }
+                });
+
+                const remainingBalance = Math.max(0, freshLimit - freshSpentTxs);
+
+                if (freshLimit > 0 && freshSpentTxs >= freshLimit) {
+                    Alert.alert(
+                        'Compromiso liquidado',
+                        'Este compromiso ya fue liquidado en este mes calendario.'
+                    );
+                    setLoading(false);
+                    return;
+                }
+
+                if (freshLimit > 0 && numericAmount > remainingBalance) {
+                    Alert.alert(
+                        'Monto excedido',
+                        `El monto ingresado ($${numericAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}) supera el saldo pendiente de este compromiso ($${remainingBalance.toLocaleString('es-MX', { minimumFractionDigits: 2 })}).`
+                    );
+                    setLoading(false);
+                    return;
+                }
+            }
+
+            // Para gastos variables: leisure o buffer según elección. Para fijos: null. Para ingresos: targetBucket.
+            const resolvedTargetBucket = isExpense
+                ? (isFixed ? null : expenseTargetBucket)
+                : targetBucket;
+
+            const todayStr = getLocalDateString(new Date());
+
             await addDoc(collection(db, 'transactions'), {
                 userId: user.uid,
                 type: isExpense ? 'expense' : 'income',
@@ -144,27 +280,19 @@ export default function AgregarRegistroScreen() {
                 category,
                 isFixedExpense: isFixed,
                 budgetId: targetBudgetId,
-                // Si es ingreso guardamos la bolsa elegida; si es gasto es null
-                targetBucket: isExpense ? null : targetBucket,
+                targetBucket: resolvedTargetBucket,
                 isShared: false,
                 sharedFundId: null,
                 monthYear: currentMonthYear,
+                date: todayStr,
                 createdAt: serverTimestamp(),
             });
-
-            // Si es un gasto fijo, actualizar currentSpent en el presupuesto correspondiente
-            if (isFixed && targetBudgetId) {
-                const budgetRef = doc(db, 'budgets', targetBudgetId);
-                await updateDoc(budgetRef, {
-                    currentSpent: increment(numericAmount),
-                    updatedAt: serverTimestamp(),
-                });
-            }
 
             Alert.alert('Guardado', `${isExpense ? 'Gasto' : 'Ingreso'} registrado con éxito.`);
             setAmount('');
             setDescription('');
             setSelectedBudget(null);
+            setExpenseTargetBucket('leisure');
 
             if (router.canGoBack()) {
                 router.back();
@@ -290,6 +418,52 @@ export default function AgregarRegistroScreen() {
                                 </View>
                             )}
 
+                            {/* Selector de Origen: SOLO si es Gasto Diario / Variable (-) */}
+                            {isExpense && (!selectedBudget || !selectedBudget.isFixedExpense) && (
+                                <View style={styles.targetBucketContainer}>
+                                    <Text style={styles.targetLabel}>Origen del gasto:</Text>
+                                    <View style={styles.targetBucketRow}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.targetBtn,
+                                                expenseTargetBucket === 'leisure' && styles.targetBtnActiveLeisure,
+                                            ]}
+                                            onPress={() => setExpenseTargetBucket('leisure')}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.targetBtnText,
+                                                    expenseTargetBucket === 'leisure' && styles.targetBtnTextActiveLeisure,
+                                                ]}
+                                                numberOfLines={1}
+                                            >
+                                                🍿 Dinero Libre / Ocio
+                                            </Text>
+                                        </TouchableOpacity>
+
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.targetBtn,
+                                                expenseTargetBucket === 'buffer' && styles.targetBtnActiveBuffer,
+                                            ]}
+                                            onPress={() => setExpenseTargetBucket('buffer')}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.targetBtnText,
+                                                    expenseTargetBucket === 'buffer' && styles.targetBtnTextActiveBuffer,
+                                                ]}
+                                                numberOfLines={1}
+                                            >
+                                                🛡️ Colchón de Imprevistos
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            )}
+
                             {/* Display del Monto (Input con teclado numérico del cel) */}
                             <View style={styles.amountDisplayRow}>
                                 <Text style={styles.amountPrefix}>$</Text>
@@ -302,11 +476,21 @@ export default function AgregarRegistroScreen() {
                                     placeholderTextColor="#475569"
                                     keyboardType="decimal-pad"
                                     value={amount}
-                                    onChangeText={setAmount}
+                                    onChangeText={handleAmountChange}
                                     autoFocus={true}
                                     selectionColor="#38BDF8"
                                 />
                             </View>
+
+                            {/* Indicador de compromiso fijo con saldo pendiente */}
+                            {selectedBudget?.isFixedExpense && pendingFixedAmount !== null && (
+                                <View style={styles.fixedLockHint}>
+                                    <Ionicons name="lock-closed" size={12} color="#38BDF8" />
+                                    <Text style={styles.fixedLockText}>
+                                        Compromiso fijo · Saldo pendiente: ${pendingFixedAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                                    </Text>
+                                </View>
+                            )}
 
                             {/* Concepto / En qué se gastó */}
                             <View style={styles.conceptBox}>
@@ -419,6 +603,10 @@ export default function AgregarRegistroScreen() {
                                                     {budgets
                                                         .filter((b) => b.isFixedExpense)
                                                         .map((b) => {
+                                                            const spentThisMonth = Math.max(paidFixedMap[b.id] || 0, paidFixedMap[b.category] || 0);
+                                                            const limitAmt = Number(b.limitAmount || 0);
+                                                            const isPaid = spentThisMonth >= limitAmt && limitAmt > 0;
+                                                            const pending = Math.max(0, limitAmt - spentThisMonth);
                                                             const isSelected = selectedBudget?.id === b.id;
                                                             const blockText = b.dueBlock === 'start'
                                                                 ? '1-10 (Principio)'
@@ -430,33 +618,55 @@ export default function AgregarRegistroScreen() {
                                                             return (
                                                                 <TouchableOpacity
                                                                     key={b.id}
+                                                                    disabled={isPaid || pending <= 0}
                                                                     style={[
                                                                         styles.categoryItem,
                                                                         isSelected && styles.categoryItemActive,
+                                                                        (isPaid || pending <= 0) && styles.categoryItemPaid,
                                                                     ]}
                                                                     onPress={() => {
+                                                                        if (isPaid || pending <= 0) return;
                                                                         setCategory(b.category);
                                                                         setSelectedBudget(b);
+                                                                        // Autocompletar con saldo pendiente
+                                                                        const pendingStr = pending > 0
+                                                                            ? (pending % 1 === 0 ? pending.toString() : pending.toFixed(2))
+                                                                            : '0';
+                                                                        setAmount(pendingStr);
                                                                         setModalCategoryVisible(false);
                                                                     }}
                                                                 >
                                                                     <View style={styles.fixedCategoryRow}>
-                                                                        <View style={{ flex: 1, marginRight: 8 }}>
-                                                                            <Text
-                                                                                style={[
-                                                                                    styles.categoryItemText,
-                                                                                    isSelected && styles.categoryItemTextActive,
-                                                                                ]}
-                                                                                numberOfLines={1}
-                                                                            >
-                                                                                {b.category}
-                                                                            </Text>
+                                                                        <View style={styles.fixedCategoryLeft}>
+                                                                            <View style={styles.fixedCategoryHeader}>
+                                                                                <Text
+                                                                                    style={[
+                                                                                        styles.categoryItemText,
+                                                                                        styles.fixedCategoryTitleText,
+                                                                                        isSelected && styles.categoryItemTextActive,
+                                                                                        isPaid && styles.categoryItemTextPaid,
+                                                                                    ]}
+                                                                                    numberOfLines={1}
+                                                                                >
+                                                                                    {b.category}
+                                                                                </Text>
+                                                                                {isPaid && (
+                                                                                    <View style={styles.paidBadge}>
+                                                                                        <Text style={styles.paidBadgeText}>✓ Pagado este mes</Text>
+                                                                                    </View>
+                                                                                )}
+                                                                            </View>
                                                                             <Text style={styles.fixedCategoryMeta}>
                                                                                 Bloque: {blockText}
                                                                             </Text>
                                                                         </View>
-                                                                        <Text style={styles.fixedCategoryAmount}>
-                                                                            ${Number(b.limitAmount).toLocaleString('es-MX', { minimumFractionDigits: 0 })}
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.fixedCategoryAmount,
+                                                                                isPaid && styles.fixedCategoryAmountPaid,
+                                                                            ]}
+                                                                        >
+                                                                            ${limitAmt.toLocaleString('es-MX', { minimumFractionDigits: 0 })}
                                                                         </Text>
                                                                     </View>
                                                                 </TouchableOpacity>
@@ -611,6 +821,22 @@ const styles = StyleSheet.create({
         borderColor: '#10B981',
         backgroundColor: 'rgba(16, 185, 129, 0.2)',
     },
+    targetBtnActiveLeisure: {
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    },
+    targetBtnTextActiveLeisure: {
+        color: '#38BDF8',
+        fontWeight: '700',
+    },
+    targetBtnActiveBuffer: {
+        borderColor: '#F59E0B',
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    },
+    targetBtnTextActiveBuffer: {
+        color: '#F59E0B',
+        fontWeight: '700',
+    },
     targetBtnText: {
         fontSize: 12,
         fontWeight: '700',
@@ -729,6 +955,12 @@ const styles = StyleSheet.create({
         borderColor: '#38BDF8',
         borderWidth: 1,
     },
+    categoryItemPaid: {
+        opacity: 0.55,
+        backgroundColor: '#0F172A',
+        borderColor: '#1E293B',
+        borderWidth: 1,
+    },
     categoryItemText: {
         color: '#94A3B8',
         fontSize: 14,
@@ -737,6 +969,10 @@ const styles = StyleSheet.create({
     categoryItemTextActive: {
         color: '#38BDF8',
         fontWeight: '800',
+    },
+    categoryItemTextPaid: {
+        color: '#64748B',
+        textDecorationLine: 'line-through',
     },
     modalScrollView: {
         maxHeight: 380,
@@ -756,6 +992,32 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
     },
+    fixedCategoryLeft: {
+        flex: 1,
+        marginRight: 8,
+    },
+    fixedCategoryHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    fixedCategoryTitleText: {
+        flexShrink: 1,
+    },
+    paidBadge: {
+        flexShrink: 0,
+        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+        borderColor: 'rgba(16, 185, 129, 0.4)',
+        borderWidth: 1,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+    },
+    paidBadgeText: {
+        color: '#10B981',
+        fontSize: 11,
+        fontWeight: '700',
+    },
     fixedCategoryMeta: {
         fontSize: 11,
         color: '#64748B',
@@ -765,5 +1027,28 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         color: '#38BDF8',
+    },
+    fixedCategoryAmountPaid: {
+        color: '#64748B',
+    },
+    fixedLockHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+        borderColor: 'rgba(56, 189, 248, 0.3)',
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        alignSelf: 'center',
+        marginTop: -4,
+        marginBottom: 4,
+    },
+    fixedLockText: {
+        color: '#38BDF8',
+        fontSize: 12,
+        fontWeight: '700',
     },
 });

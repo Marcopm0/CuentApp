@@ -20,30 +20,31 @@ export interface UserProfile {
 }
 
 export interface Transaction {
-    id: string;
-    userId?: string;
-    type: 'income' | 'expense';
+    id?: string;
+    userId: string;
     amount: number;
+    type: 'income' | 'expense';
     category: string;
     description?: string;
-    targetBucket?: 'leisure' | 'buffer' | 'savings' | null;
     isFixedExpense?: boolean;
     budgetId?: string | null;
-    isShared?: boolean;
-    sharedFundId?: string | null;
+    origin?: 'ocio' | 'buffer' | 'fixed' | 'income';
+    destination?: string;
+    date: string; // Formato estricto 'YYYY-MM-DD' para agrupaciones y filtros
+    createdAt: any; // Firestore FieldValue (serverTimestamp) o Timestamp
+    targetBucket?: 'leisure' | 'buffer' | 'savings' | null;
     monthYear?: string;
     periodKey?: string;
-    createdAt?: any;
-    date?: any;
+    isShared?: boolean;
+    sharedFundId?: string | null;
 }
 
 export interface Budget {
     id: string;
     userId?: string;
+    name?: string;
     category: string;
     limitAmount: number;
-    currentSpent: number;
-    monthYear?: string;
     isFixedExpense: boolean;
     dueBlock?: DueBlock;
     createdAt?: any;

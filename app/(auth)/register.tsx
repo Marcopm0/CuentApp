@@ -15,10 +15,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Servicio de Firebase
-import { createUserWithEmailAndPassword, sendEmailVerification, signOut } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { auth, db } from '../../services/firebase';
+// Servicio de Autenticación
+import { getAuthErrorMessage, registerUser } from '@/services/authService';
 
 export default function RegisterScreen() {
     const router = useRouter();
@@ -52,23 +50,11 @@ export default function RegisterScreen() {
         setIsLoading(true);
 
         try {
-            // 1. Crear usuario en Firebase
-            const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-            const user = userCredential.user;
-
-            // 2. Crear documento de perfil en Firestore (colección "users")
-            await setDoc(doc(db, 'users', user.uid), {
-                uid: user.uid,
-                email: user.email,
+            await registerUser({
                 displayName: displayName.trim(),
-                currency: 'MXN',
-                hasCompletedOnboarding: false, // <-- Bandera agregada
-                createdAt: serverTimestamp(),
+                email: email.trim(),
+                password,
             });
-
-            // 3. Enviar correo de verificación y cerrar sesión temporal
-            await sendEmailVerification(user);
-            await signOut(auth);
 
             Alert.alert(
                 'Cuenta creada',
@@ -81,19 +67,8 @@ export default function RegisterScreen() {
                 ]
             );
         } catch (error: any) {
-            console.error('DEBUG REGISTRO ERROR COMPLETO:', error);
-            console.log('CÓDIGO DE ERROR:', error.code);
-            console.log('MENSAJE DE ERROR:', error.message);
-
-            let errorMessage = `Error (${error.code || 'sin código'}): ${error.message}`;
-
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = 'Este correo electrónico ya está registrado.';
-            } else if (error.code === 'auth/invalid-email') {
-                errorMessage = 'El correo electrónico no es válido.';
-            } else if (error.code === 'auth/network-request-failed') {
-                errorMessage = 'Error de conexión. Verifica tu conexión a internet.';
-            }
+            console.error('Error al registrar usuario:', error);
+            const errorMessage = getAuthErrorMessage(error);
             Alert.alert('Error de registro', errorMessage);
         } finally {
             setIsLoading(false);

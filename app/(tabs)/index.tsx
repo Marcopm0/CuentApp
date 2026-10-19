@@ -1,38 +1,19 @@
 import { ThemedText } from '@/components/themed-text';
 import { auth, db } from '@/services/firebase';
+import { Budget, Transaction } from '@/types/database';
+import { deduplicateBudgets } from '@/utils/budgets';
+import { getLocalDateString, getTransactionDate } from '@/utils/dates';
 import { DueBlock, getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-
-
-interface Budget {
-  id: string;
-  category: string;
-  limitAmount: number;
-  currentSpent: number;
-  isFixedExpense: boolean;
-  dueBlock?: DueBlock;
-}
-
-interface Transaction {
-  description: string;
-  id: string;
-  type: 'income' | 'expense';
-  amount: number;
-  category: string;
-  isFixedExpense?: boolean;
-  budgetId?: string | null;
-  createdAt?: any;
-  targetBucket?: 'leisure' | 'buffer' | 'savings';
-}
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const [userName, setUserName] = useState<string>('Usuario');
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [monthlyIncome, setMonthlyIncome] = useState<number>(0);
   const [savingsTarget, setSavingTarget] = useState<number>(0);
   // Estados para periodicidad de pago
   const [payFrequency, setPayFrequency] = useState<PayFrequency>('biweekly');
@@ -48,12 +29,7 @@ export default function HomeScreen() {
   //Para el registro de gastos
   const ultimosMovimientos = useMemo(() => {
     return [...transactions]
-      .sort((a, b) => {
-        // Obtenemos los milisegundos del Timestamp de Firestore
-        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0);
-        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0);
-        return timeB - timeA; // El más reciente (mayor timestamp) va primero
-      })
+      .sort((a, b) => getTransactionDate(b).getTime() - getTransactionDate(a).getTime())
       .slice(0, 5); // Solo los primeros 5
   }, [transactions]);
 
@@ -91,7 +67,6 @@ export default function HomeScreen() {
           const nombre = data.displayName || data.name;
           if (nombre) setUserName(nombre.split(' ')[0]);
           const ingresoTotal = Number(data.monthlyIncome) || 0;
-          if (ingresoTotal) setMonthlyIncome(ingresoTotal);
           if (data.savingsTarget) setSavingTarget(Number(data.savingsTarget) || 0);
 
           // Frecuencia de cobro (quincenal por defecto)
@@ -125,19 +100,19 @@ export default function HomeScreen() {
     };
     fetchUserData();
 
-    //3. suscripcion en tiempo real a los presupuestos
+    // 3. Suscripción en tiempo real a los presupuestos maestros permanentes
     const budgetsQuery = query(
       collection(db, 'budgets'),
-      where('userId', '==', user.uid),
-      where('monthYear', '==', currentMonthYear)
+      where('userId', '==', user.uid)
     );
 
     const unsubscribeBudgets = onSnapshot(budgetsQuery, (snapshot) => {
-      const docs: Budget[] = snapshot.docs.map((d) => ({
+      const rawDocs: Budget[] = snapshot.docs.map((d) => ({
         id: d.id,
         ...(d.data() as Omit<Budget, 'id'>),
       }));
-      setBudgets(docs);
+      // Deduplicar presupuestos por categoría (priorizando presupuestos permanentes)
+      setBudgets(deduplicateBudgets(rawDocs));
     });
     // 4. Suscripción en tiempo real a transacciones personales
     const txQuery = query(
@@ -191,7 +166,9 @@ export default function HomeScreen() {
   // ─────────────────────────────────────────────────────────────
   const {
     totalAvailable,
-    isTouchingBuffer,
+    isBufferActiveHealthy,
+    isBufferWarning,
+    isBufferCritical,
     isOverdrawn,
     leisureLimit,
     leisureRemaining,
@@ -241,13 +218,8 @@ export default function HomeScreen() {
         return (t as any).periodKey === periodInfo.periodKey;
       }
       if (periodInfo.startDate && periodInfo.endDate) {
-        const time = t.createdAt?.toMillis
-          ? t.createdAt.toMillis()
-          : (t.createdAt?.seconds ? t.createdAt.seconds * 1000 : null);
-        if (time) {
-          const txDate = new Date(time);
-          return txDate >= periodInfo.startDate && txDate <= periodInfo.endDate;
-        }
+        const txDate = getTransactionDate(t);
+        return txDate >= periodInfo.startDate && txDate <= periodInfo.endDate;
       }
       return (t as any).monthYear === currentMonthYear;
     };
@@ -270,59 +242,96 @@ export default function HomeScreen() {
     const effectiveBufferInitial = periodBuffer + extraColchon;
     const userHasBuffer = effectiveBufferInitial > 0;
 
-    // 8. Gastos variables del periodo (filtrar únicamente las transacciones que NO sean de gasto fijo)
+    // 8. Gastos variables del periodo (clasificados según la bolsa origen seleccionada)
     const transaccionesVariables = transactions.filter(
       (t) => t.type === 'expense' && !t.isFixedExpense && t.category !== 'Gasto Fijo' && isTxInCurrentPeriod(t)
     );
-    const gastosVariablesDelPeriodo = transaccionesVariables
+
+    // Gastos que se descuentan de la bolsa de ocio (por defecto o si targetBucket !== 'buffer')
+    const gastosOcio = transaccionesVariables
+      .filter((t) => t.targetBucket !== 'buffer')
       .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+    // Gastos que se descuentan directamente del colchón de imprevistos
+    const gastosBufferDirectos = transaccionesVariables
+      .filter((t) => t.targetBucket === 'buffer')
+      .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+    const gastosVariablesDelPeriodo = gastosOcio + gastosBufferDirectos;
 
     // 9. Disponible real del periodo que refleja fielmente la liquidez
     const balance = effectiveLeisureLimit + effectiveBufferInitial - gastosVariablesDelPeriodo;
 
-    // 10. Cascada de Ocio y Colchón
-    const lRemaining = Math.max(0, effectiveLeisureLimit - gastosVariablesDelPeriodo);
-    const overspent = Math.max(0, gastosVariablesDelPeriodo - effectiveLeisureLimit);
+    // 10. Descuento de Ocio y Colchón
+    // Ocio disponible descontando únicamente los gastos de ocio
+    const lRemaining = Math.max(0, effectiveLeisureLimit - gastosOcio);
+    // Si los gastos de ocio superan el límite de ocio, el exceso se desborda hacia el colchón
+    const overspentOcio = Math.max(0, gastosOcio - effectiveLeisureLimit);
+    const hasOcioDeficit = overspentOcio > 0;
+
+    // El colchón se descuenta por gastos de emergencia directos + el desbordamiento de ocio
+    const totalConsumoBuffer = gastosBufferDirectos + overspentOcio;
 
     let bRemaining = 0;
-    let touchingBuffer = false;
     let overdrawn = false;
+    let bufferPctRemaining = 100;
 
     if (userHasBuffer) {
-      bRemaining = Math.max(0, effectiveBufferInitial - overspent);
-      touchingBuffer = overspent > 0;
-      overdrawn = overspent > effectiveBufferInitial;
+      bRemaining = Math.max(0, effectiveBufferInitial - totalConsumoBuffer);
+      overdrawn = totalConsumoBuffer > effectiveBufferInitial;
+      bufferPctRemaining = effectiveBufferInitial > 0 ? (bRemaining / effectiveBufferInitial) * 100 : 0;
     } else {
-      overdrawn = gastosVariablesDelPeriodo > effectiveLeisureLimit;
+      overdrawn = hasOcioDeficit || gastosBufferDirectos > 0;
     }
+
+    // Punto 3: Suavizar estados del colchón.
+    // Estado Crítico (Rojo): Sobregiro total, o colchón cae por debajo del 15% o déficit real en ocio
+    const isBufferCritical = overdrawn || (userHasBuffer && (bufferPctRemaining < 15 || hasOcioDeficit));
+    // Estado Advertencia (Naranja): Colchón consumido entre 15% y 25% restante (sin déficit de ocio y sin crítico)
+    const isBufferWarning = !isBufferCritical && userHasBuffer && totalConsumoBuffer > 0 && bufferPctRemaining < 25;
+    // Estado Activo Saludable (Verde/Neutro): Colchón conserva >= 25% y ocio no tiene déficit
+    const isBufferActiveHealthy = !isBufferCritical && !isBufferWarning && userHasBuffer && totalConsumoBuffer > 0 && bufferPctRemaining >= 25 && !hasOcioDeficit;
 
     // 11. Semáforo dinámico
     let color = '#10B981';
-    let label = 'Bajo Control';
+    let label = '• Ritmo Saludable';
     let progress = 0;
     let pie = '';
 
     if (userHasBuffer) {
-      if (touchingBuffer) {
+      if (isBufferCritical) {
         color = '#EF4444';
-        label = overdrawn ? 'Sobregirado' : 'En Reserva';
-        progress = Math.min(100, (overspent / effectiveBufferInitial) * 100);
+        label = overdrawn ? '🔴 Sobregirado' : '🔴 En Peligro';
+        progress = Math.min(100, (totalConsumoBuffer / effectiveBufferInitial) * 100);
         pie = overdrawn
-          ? `¡Cuidado! Te pasaste por $${(overspent - effectiveBufferInitial).toFixed(2)} de tu colchón.`
-          : `Has consumido $${overspent.toFixed(2)} de tu reserva de imprevistos.`;
+          ? `¡Cuidado! Te pasaste por $${(totalConsumoBuffer - effectiveBufferInitial).toFixed(2)} de tu colchón.`
+          : `Alerta: Reserva crítica (${bufferPctRemaining.toFixed(0)}% restante). Modera tus salidas de dinero.`;
+      } else if (isBufferWarning) {
+        color = '#F59E0B';
+        label = 'Precaución';
+        progress = Math.min(100, (totalConsumoBuffer / effectiveBufferInitial) * 100);
+        pie = `Has consumido el ${(100 - bufferPctRemaining).toFixed(0)}% de tu reserva. Te quedan $${bRemaining.toFixed(2)}.`;
+      } else if (isBufferActiveHealthy) {
+        color = '#10B981';
+        label = '🛡️ Reserva Activa';
+        progress = Math.min(100, (totalConsumoBuffer / effectiveBufferInitial) * 100);
+        pie = `Uso previsto de reserva: saldo saludable ($${bRemaining.toFixed(2)} restantes en colchón).`;
       } else {
-        const pct = effectiveLeisureLimit > 0 ? (gastosVariablesDelPeriodo / effectiveLeisureLimit) * 100 : 0;
+        // Colchón al 100% intacto (totalConsumoBuffer === 0)
+        const pct = effectiveLeisureLimit > 0 ? (gastosOcio / effectiveLeisureLimit) * 100 : 0;
         progress = Math.min(100, pct);
         if (pct > 65) {
           color = '#F59E0B';
           label = 'Precaución';
           pie = `Has gastado el ${pct.toFixed(0)}% de tu ocio. Te quedan $${lRemaining.toFixed(2)}.`;
         } else {
+          color = '#10B981';
+          label = '• Ritmo Saludable';
           pie = `Ritmo saludable: te quedan $${lRemaining.toFixed(2)} para gastar en ocio.`;
         }
       }
     } else {
-      const pct = effectiveLeisureLimit > 0 ? (gastosVariablesDelPeriodo / effectiveLeisureLimit) * 100 : 0;
+      const pct = effectiveLeisureLimit > 0 ? (gastosOcio / effectiveLeisureLimit) * 100 : 0;
       progress = Math.min(100, pct);
       if (overdrawn) {
         color = '#EF4444';
@@ -333,13 +342,17 @@ export default function HomeScreen() {
         label = 'Precaución';
         pie = `Has gastado el ${pct.toFixed(0)}% de tu dinero libre.`;
       } else {
+        color = '#10B981';
+        label = 'Bajo Control';
         pie = `Todo en orden: llevas el ${pct.toFixed(0)}% de tu dinero libre consumido.`;
       }
     }
 
     return {
       totalAvailable: balance,
-      isTouchingBuffer: touchingBuffer,
+      isBufferActiveHealthy,
+      isBufferWarning,
+      isBufferCritical,
       isOverdrawn: overdrawn,
       leisureLimit: effectiveLeisureLimit,
       leisureRemaining: lRemaining,
@@ -354,7 +367,7 @@ export default function HomeScreen() {
   }, [budgets, transactions, payFrequency, payDayOfWeek, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear, userProfile, isFirstCycle]);
 
   // ─────────────────────────────────────────────────────────────
-  // COMPROMISOS Y GASTOS FIJOS (TARJETA DE SEGUIMIENTO MENSUAL)
+  // COMPROMISOS Y GASTOS FIJOS (TARJETA DE SEGUIMIENTO MENSUAL - OPCIÓN B)
   // ─────────────────────────────────────────────────────────────
   const presupuestosFijos = useMemo(() => {
     return budgets.filter((b) => b.isFixedExpense);
@@ -364,9 +377,46 @@ export default function HomeScreen() {
     return presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
   }, [presupuestosFijos]);
 
+  // Transacciones del mes en curso (obtenido del reloj local)
+  const monthlyTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      if (tx.monthYear) {
+        return tx.monthYear === currentMonthYear;
+      }
+      const d = getTransactionDate(tx);
+      const my = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return my === currentMonthYear;
+    });
+  }, [transactions, currentMonthYear]);
+
+  // Cálculo reactivo y dinámico de fijos pagados y saldo restante
+  const fixedExpensesStatus = useMemo(() => {
+    return presupuestosFijos.map((budget) => {
+      const spentThisMonth = monthlyTransactions
+        .filter(
+          (tx) =>
+            tx.type === 'expense' &&
+            tx.isFixedExpense === true &&
+            (tx.budgetId === budget.id || tx.category === budget.category)
+        )
+        .reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+
+      const limitAmount = Number(budget.limitAmount) || 0;
+      const isPaid = spentThisMonth >= limitAmount && limitAmount > 0;
+      const remainingBalance = Math.max(0, limitAmount - spentThisMonth);
+
+      return {
+        ...budget,
+        spentThisMonth,
+        isPaid,
+        remainingBalance,
+      };
+    });
+  }, [presupuestosFijos, monthlyTransactions]);
+
   const totalPagado = useMemo(() => {
-    return presupuestosFijos.reduce((acc, b) => acc + (Number(b.currentSpent) || 0), 0);
-  }, [presupuestosFijos]);
+    return fixedExpensesStatus.reduce((acc, b) => acc + b.spentThisMonth, 0);
+  }, [fixedExpensesStatus]);
 
   const progresoFijos = useMemo(() => {
     if (totalFijosMes <= 0) return 0;
@@ -403,6 +453,7 @@ export default function HomeScreen() {
     setIsAbonando(true);
     try {
       const batch = writeBatch(db);
+      const todayStr = getLocalDateString(new Date());
 
       // 1. Abono de sueldo del nuevo periodo
       const sueldoRef = doc(collection(db, 'transactions'));
@@ -416,7 +467,7 @@ export default function HomeScreen() {
         targetBucket: 'leisure',
         periodKey: periodInfo.periodKey,
         monthYear: currentMonthYear,
-        date: serverTimestamp(),
+        date: todayStr,
         createdAt: serverTimestamp(),
         isShared: false,
         sharedFundId: null,
@@ -438,7 +489,7 @@ export default function HomeScreen() {
           targetBucket: targetBucket,
           periodKey: periodInfo.periodKey,
           monthYear: currentMonthYear,
-          date: serverTimestamp(),
+          date: todayStr,
           createdAt: serverTimestamp(),
           isShared: false,
           sharedFundId: null,
@@ -456,7 +507,7 @@ export default function HomeScreen() {
 
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <ThemedText type='title'>Inicio</ThemedText>
         <View style={styles.headerRow}>
@@ -553,20 +604,30 @@ export default function HomeScreen() {
         )}
 
         {/***************Tarjeta de gastos disponibles **********************/}
-        <View style={[styles.widget, isTouchingBuffer && styles.widgetWarning, isOverdrawn && styles.widgetDanger]}>
+        <View style={[
+          styles.widget,
+          isBufferWarning && styles.widgetWarning,
+          (isBufferCritical || isOverdrawn) && styles.widgetDanger,
+        ]}>
           <View style={styles.widgetHeader}>
             <ThemedText style={styles.widgetlabel}>Disponible para gastar</ThemedText>
-            {isTouchingBuffer && !isOverdrawn && (
-              <ThemedText style={styles.statusBadgeWarning}>⚠️ Tocando reserva</ThemedText>
-            )}
             {isOverdrawn && (
               <ThemedText style={styles.statusBadgeDanger}>!!Sobregiro</ThemedText>
+            )}
+            {!isOverdrawn && isBufferCritical && (
+              <ThemedText style={styles.statusBadgeDanger}>🔴 En Peligro</ThemedText>
+            )}
+            {!isOverdrawn && isBufferWarning && (
+              <ThemedText style={styles.statusBadgeWarning}>⚠️ Reserva Baja</ThemedText>
+            )}
+            {!isOverdrawn && isBufferActiveHealthy && (
+              <ThemedText style={styles.statusBadgeHealthy}>🛡️ Reserva Activa</ThemedText>
             )}
           </View>
           <ThemedText
             style={[
               styles.widgetAmount,
-              isOverdrawn && { color: '#EF4444' },
+              (isBufferCritical || isOverdrawn) && { color: '#EF4444' },
             ]}
           >
             ${totalAvailable.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
@@ -629,9 +690,11 @@ export default function HomeScreen() {
                 <ThemedText
                   style={[
                     styles.bucketValue,
-                    isTouchingBuffer
-                      ? styles.bucketValueWarning
-                      : styles.bucketValueSafe,
+                    isBufferCritical
+                      ? styles.bucketValueDanger
+                      : isBufferWarning
+                        ? styles.bucketValueWarning
+                        : styles.bucketValueSafe,
                   ]}
                 >
                   ${bufferRemaining.toFixed(2)}
@@ -699,8 +762,8 @@ export default function HomeScreen() {
             </ThemedText>
           ) : (
             <View style={styles.fixedListContainer}>
-              {presupuestosFijos.map((b) => {
-                const pagado = (Number(b.currentSpent) || 0) >= Number(b.limitAmount);
+              {fixedExpensesStatus.map((b) => {
+                const pagado = b.isPaid;
                 return (
                   <View key={b.id} style={styles.fixedItemRow}>
                     <View style={styles.fixedItemLeft}>
@@ -877,18 +940,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#EF4444',
   },
+  statusBadgeHealthy: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#10B981',
+  },
   currencyCode: {
     fontSize: 16,
     fontWeight: '600',
     color: '#64748B',
   },
 
-  //registro
-  TotalGastadoLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#EF4444',
-  },
+
   emptyStateText: {
     fontSize: 13,
     color: '#64748B',
@@ -982,6 +1045,9 @@ const styles = StyleSheet.create({
   },
   bucketValueWarning: {
     color: '#F59E0B',
+  },
+  bucketValueDanger: {
+    color: '#EF4444',
   },
   assignedBadge: {
     fontSize: 13,
@@ -1134,11 +1200,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  fixedCardTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#F8FAFC',
-  },
+
   fixedCardSummary: {
     fontSize: 14,
     fontWeight: '700',
