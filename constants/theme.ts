@@ -58,7 +58,7 @@ export const Theme = {
     background: '#0B0F17',
     cardSurface: '#161F30',
     cardSurfaceSubtle: '#0E1420',
-    
+
     // Bordes y Divisores
     border: '#24324D',
     borderSubtle: '#1E293B',
