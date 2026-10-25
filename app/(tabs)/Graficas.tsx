@@ -365,6 +365,76 @@ export default function GraficasScreen() {
     ]);
 
     // ─────────────────────────────────────────────────────────────
+    // CÁLCULOS: AHORRO ACUMULADO HISTÓRICO (Opción A: Flujo Real)
+    // ─────────────────────────────────────────────────────────────
+    const ahorroAcumuladoData = useMemo(() => {
+        const isSavingsIncome = (t: Transaction): boolean => {
+            if (t.type !== 'income') return false;
+            const target = (
+                (t.targetBucket as string) ||
+                (t as any).toBucket ||
+                (t as any).destination ||
+                ''
+            ).toLowerCase();
+            const cat = (t.category || '').toLowerCase();
+            return target === 'savings' || target === 'ahorro' || cat.includes('ahorro');
+        };
+
+        const isSavingsExpense = (t: Transaction): boolean => {
+            if (t.type !== 'expense') return false;
+            const origin = (
+                (t.origin as string) ||
+                (t as any).fromBucket ||
+                (t as any).sourceBucket ||
+                (t.targetBucket as string) ||
+                ''
+            ).toLowerCase();
+            const cat = (t.category || '').toLowerCase();
+            return (
+                origin === 'savings' ||
+                origin === 'ahorro' ||
+                cat.includes('retiro de ahorro') ||
+                cat.includes('retiro ahorro')
+            );
+        };
+
+        // 1. Histórico Completo
+        let totalIngresos = 0;
+        let totalEgresos = 0;
+        for (const t of transactions) {
+            const amount = Number(t.amount) || 0;
+            if (isSavingsIncome(t)) {
+                totalIngresos += amount;
+            } else if (isSavingsExpense(t)) {
+                totalEgresos += amount;
+            }
+        }
+        const totalAcumulado = Math.max(0, totalIngresos - totalEgresos);
+
+        // 2. Aportación / Movimiento en el Periodo Activo (scopedTransactions)
+        let periodoIngresos = 0;
+        let periodoEgresos = 0;
+        for (const t of scopedTransactions) {
+            const amount = Number(t.amount) || 0;
+            if (isSavingsIncome(t)) {
+                periodoIngresos += amount;
+            } else if (isSavingsExpense(t)) {
+                periodoEgresos += amount;
+            }
+        }
+        const periodoNeto = periodoIngresos - periodoEgresos;
+
+        return {
+            totalAcumulado,
+            totalIngresos,
+            totalEgresos,
+            periodoNeto,
+            periodoIngresos,
+            periodoEgresos,
+        };
+    }, [transactions, scopedTransactions]);
+
+    // ─────────────────────────────────────────────────────────────
     // CÁLCULOS: MÓDULO 3 (Top de Gastos por Categoría)
     // ─────────────────────────────────────────────────────────────
     const { topCategorias, totalGastosScope } = useMemo(() => {
@@ -902,6 +972,110 @@ export default function GraficasScreen() {
                                     {formatCurrency(bufferMaster)}
                                 </Text>
                             </View>
+                        </View>
+                    </View>
+                </View>
+
+                {/* ─────────────────────────────────────────────────────────────
+            MÓDULO: AHORRO TOTAL ACUMULADO (HISTÓRICO CONSOLIDADO)
+            ───────────────────────────────────────────────────────────── */}
+                <View style={styles.card}>
+                    <View style={styles.cardHeader}>
+                        <View style={styles.cardHeaderLeft}>
+                            <View style={[styles.iconCircle, { backgroundColor: 'rgba(168, 85, 247, 0.15)' }]}>
+                                <Ionicons name="cash-outline" size={18} color={Theme.colors.savings} />
+                            </View>
+                            <View>
+                                <Text style={styles.cardTitle}>Ahorro Total Acumulado</Text>
+                                <Text style={styles.cardSubtitle}>
+                                    Fondo consolidado en reserva histórica
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Visor de Monto Hero */}
+                    <View style={styles.savingsHeroBox}>
+                        <Text style={styles.savingsHeroLabel}>Capital en Reserva</Text>
+                        <View style={styles.savingsAmountRow}>
+                            <Text style={styles.savingsAmountText}>
+                                {formatCurrency(ahorroAcumuladoData.totalAcumulado)}
+                            </Text>
+                            <Text style={styles.currencyBadge}>MXN</Text>
+                        </View>
+
+                        {/* Micro-badge contextual de aportación del periodo */}
+                        <View style={styles.savingsBadgeRow}>
+                            <View
+                                style={[
+                                    styles.savingsTrendBadge,
+                                    ahorroAcumuladoData.periodoNeto > 0
+                                        ? styles.savingsTrendBadgePositive
+                                        : ahorroAcumuladoData.periodoNeto < 0
+                                            ? styles.savingsTrendBadgeNegative
+                                            : styles.savingsTrendBadgeNeutral,
+                                ]}
+                            >
+                                <Ionicons
+                                    name={
+                                        ahorroAcumuladoData.periodoNeto > 0
+                                            ? 'trending-up'
+                                            : ahorroAcumuladoData.periodoNeto < 0
+                                                ? 'trending-down'
+                                                : 'remove-outline'
+                                    }
+                                    size={13}
+                                    color={
+                                        ahorroAcumuladoData.periodoNeto > 0
+                                            ? Theme.colors.statusSuccess
+                                            : ahorroAcumuladoData.periodoNeto < 0
+                                                ? Theme.colors.statusDanger
+                                                : Theme.colors.textMuted
+                                    }
+                                />
+                                <Text
+                                    style={[
+                                        styles.savingsTrendText,
+                                        ahorroAcumuladoData.periodoNeto > 0
+                                            ? styles.savingsTrendTextPositive
+                                            : ahorroAcumuladoData.periodoNeto < 0
+                                                ? styles.savingsTrendTextNegative
+                                                : styles.savingsTrendTextNeutral,
+                                    ]}
+                                >
+                                    {ahorroAcumuladoData.periodoNeto > 0
+                                        ? `+${formatCurrency(ahorroAcumuladoData.periodoNeto)} en este periodo`
+                                        : ahorroAcumuladoData.periodoNeto < 0
+                                            ? `-${formatCurrency(Math.abs(ahorroAcumuladoData.periodoNeto))} en este periodo`
+                                            : 'Sin aportaciones en este periodo'}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    <View style={styles.cardDivider} />
+
+                    {/* Desglose / Comparativa de Apoyo */}
+                    <View style={styles.savingsFootnoteRow}>
+                        <View style={styles.savingsFootnoteItem}>
+                            <Text style={styles.savingsFootnoteLabel}>Meta del Ciclo</Text>
+                            <Text style={styles.savingsFootnoteValue}>
+                                {formatCurrency(ahorroMaster)}
+                            </Text>
+                        </View>
+                        <View style={styles.verticalDivider} />
+                        <View style={styles.savingsFootnoteItem}>
+                            <Text style={styles.savingsFootnoteLabel}>Meta Mensual</Text>
+                            <Text style={styles.savingsFootnoteValue}>
+                                {formatCurrency(savingsTarget)}
+                            </Text>
+                        </View>
+                        <View style={styles.verticalDivider} />
+                        <View style={styles.savingsFootnoteItem}>
+                            <Text style={styles.savingsFootnoteLabel}>Aportado Histórico</Text>
+                            <Text style={[styles.savingsFootnoteValue, { color: Theme.colors.savings }]}>
+                                {formatCurrency(ahorroAcumuladoData.totalIngresos)}
+                            </Text>
                         </View>
                     </View>
                 </View>
@@ -1733,5 +1907,89 @@ const styles = StyleSheet.create({
     healthFillBar: {
         height: '100%',
         borderRadius: 4,
+    },
+
+    // Módulo Ahorro Acumulado Histórico
+    savingsHeroBox: {
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        gap: 6,
+    },
+    savingsHeroLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Theme.colors.textSecondary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    savingsAmountRow: {
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        gap: 6,
+    },
+    savingsAmountText: {
+        fontSize: 30,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+        color: Theme.colors.textPrimary,
+    },
+    savingsBadgeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    savingsTrendBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 8,
+    },
+    savingsTrendBadgePositive: {
+        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    },
+    savingsTrendBadgeNegative: {
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    },
+    savingsTrendBadgeNeutral: {
+        backgroundColor: 'rgba(100, 116, 139, 0.15)',
+    },
+    savingsTrendText: {
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    savingsTrendTextPositive: {
+        color: Theme.colors.statusSuccess,
+    },
+    savingsTrendTextNegative: {
+        color: Theme.colors.statusDanger,
+    },
+    savingsTrendTextNeutral: {
+        color: Theme.colors.textMuted,
+    },
+    savingsFootnoteRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingTop: 2,
+    },
+    savingsFootnoteItem: {
+        flex: 1,
+        alignItems: 'center',
+        gap: 2,
+    },
+    savingsFootnoteLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: Theme.colors.textMuted,
+    },
+    savingsFootnoteValue: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
     },
 });
