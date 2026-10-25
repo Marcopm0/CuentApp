@@ -6,7 +6,7 @@ import { deduplicateBudgets } from '@/utils/budgets';
 import { getLocalDateString, getTransactionDate } from '@/utils/dates';
 import { DueBlock, getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -446,6 +446,52 @@ export default function HomeScreen() {
       (t) => t.type === 'income' && (t as any).periodKey === periodInfo.periodKey && t.category === '💵 Sueldo'
     );
   }, [transactions, periodInfo]);
+
+  // ─────────────────────────────────────────────────────────────
+  // SINCRONIZACIÓN IDEMPOTENTE DE AHORRO BASE (Cuentas nuevas y existentes)
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user || !periodInfo?.periodKey) return;
+
+    const divisor = payFrequency === 'weekly' ? 4 : payFrequency === 'biweekly' ? 2 : 1;
+    const cuotaAhorro = (savingsTarget || 0) / divisor;
+
+    // Si hay cuota presupuestada y el sueldo de este periodo ya fue cobrado
+    if (cuotaAhorro > 0 && yaCobrado) {
+      const hasAhorroBase = transactions.some(
+        (t) => t.periodKey === periodInfo.periodKey && t.category === '🎯 Ahorro Base'
+      );
+
+      if (!hasAhorroBase) {
+        const ahorroBaseDocId = `${user.uid}_ahorro_base_${periodInfo.periodKey}`;
+        const todayStr = getLocalDateString(new Date());
+        const ahorroBaseRef = doc(db, 'transactions', ahorroBaseDocId);
+
+        setDoc(
+          ahorroBaseRef,
+          {
+            id: ahorroBaseDocId,
+            userId: user.uid,
+            type: 'income',
+            amount: cuotaAhorro,
+            category: '🎯 Ahorro Base',
+            description: 'Aporte base presupuestado al ahorro',
+            targetBucket: 'savings',
+            periodKey: periodInfo.periodKey,
+            monthYear: currentMonthYear,
+            date: todayStr,
+            createdAt: serverTimestamp(),
+            isShared: false,
+            sharedFundId: null,
+          },
+          { merge: true }
+        ).catch((err) => {
+          console.error('Error al sincronizar Ahorro Base del periodo:', err);
+        });
+      }
+    }
+  }, [yaCobrado, savingsTarget, payFrequency, periodInfo, transactions, currentMonthYear]);
 
   const handleAbonar = async (surplus: number = 0, targetBucket?: 'savings' | 'buffer') => {
     const user = auth.currentUser;

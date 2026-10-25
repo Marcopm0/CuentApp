@@ -98,11 +98,24 @@ export default function SetupScreen() {
     // Solo mostrar si la frecuencia NO es mensual y hay al menos un gasto en el ciclo entrante
     const showSyncQuestion = payFrequency !== 'monthly' && nextCycleExpenses.length > 0;
 
-    const remainingAfterFixed = Math.max(0, numericIncome - totalFixed);
+    // Multiplicador para normalizar valores capturados por ciclo a escala mensual
+    const cycleMultiplier = payFrequency === 'weekly' ? 4 : payFrequency === 'biweekly' ? 2 : 1;
+    const periodSuffix =
+        payFrequency === 'weekly' ? 'por semana' : payFrequency === 'biweekly' ? 'por quincena' : 'al mes';
+
+    // Monto disponible por periodo tras gastos fijos proporcionales
+    const fixedPerPeriod = totalFixed / cycleMultiplier;
+    const remainingAfterFixedPerPeriod = Math.max(0, numericPeriodAmount - fixedPerPeriod);
+
     const numericSaving = parseFloat(savings) || 0;
     const numericLeisure = parseFloat(leisure) || 0;
-    const totalAllocatedPaso3 = numericSaving + numericLeisure;
-    const unallocatedBuffer = remainingAfterFixed - totalAllocatedPaso3;
+    const totalAllocatedPerPeriod = numericSaving + numericLeisure;
+    const unallocatedBufferPerPeriod = remainingAfterFixedPerPeriod - totalAllocatedPerPeriod;
+
+    // Normalización mensual para persistencia en Firestore y coherencia con divisores
+    const normalizedMonthlySavings = numericSaving * cycleMultiplier;
+    const normalizedMonthlyLeisure = numericLeisure * cycleMultiplier;
+    const unallocatedBufferMonthly = unallocatedBufferPerPeriod * cycleMultiplier;
 
     const toggleExpense = (id: string) => {
         setExpenses((prev) =>
@@ -176,10 +189,10 @@ export default function SetupScreen() {
     };
 
     const handleFinish = async () => {
-        if (unallocatedBuffer < 0) {
+        if (unallocatedBufferPerPeriod < 0) {
             Alert.alert(
                 'Distribución excedida',
-                `La suma de ahorro y ocio ($${totalAllocatedPaso3.toFixed(2)}) supera los $${remainingAfterFixed.toFixed(2)} que tenías disponibles tras tus gastos fijos.`
+                `La suma de ahorro y ocio ($${totalAllocatedPerPeriod.toFixed(2)}) supera los $${remainingAfterFixedPerPeriod.toFixed(2)} que tenías disponibles tras tus gastos fijos ${periodSuffix}.`
             );
             return;
         }
@@ -201,8 +214,8 @@ export default function SetupScreen() {
                 payDayOfWeek: payFrequency === 'weekly' ? payDayOfWeek : undefined,
                 amountPerPeriod: numericPeriodAmount,
                 fixedExpenses: activeExpenses,
-                savingsTarget: numericSaving,
-                leisureBudget: numericLeisure,
+                savingsTarget: normalizedMonthlySavings,
+                leisureBudget: normalizedMonthlyLeisure,
                 hasPreSavedNextCycle: payFrequency === 'monthly' ? true : (hasPreSavedNextCycle ?? true),
             });
 
@@ -569,12 +582,21 @@ export default function SetupScreen() {
                                 </View>
                                 <Text style={styles.title}>Ahorro y Ocio</Text>
                                 <Text style={styles.subtitle}>
-                                    Te quedan <Text style={styles.summaryHighlight}>${remainingAfterFixed.toFixed(2)} MXN</Text> libres.
-                                    Repártelos entre tus metas de ahorro y entretenimiento.
+                                    Te quedan{' '}
+                                    <Text style={styles.summaryHighlight}>
+                                        ${remainingAfterFixedPerPeriod.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN
+                                    </Text>{' '}
+                                    libres {periodSuffix}. Repártelos entre tus metas de ahorro y entretenimiento.
                                 </Text>
 
                                 <View style={styles.inputBlock}>
-                                    <Text style={styles.inputLabel}>🎯 Meta de Ahorro Mensual</Text>
+                                    <Text style={styles.inputLabel}>
+                                        {payFrequency === 'weekly'
+                                            ? '🎯 Meta de ahorro por semana'
+                                            : payFrequency === 'biweekly'
+                                                ? '🎯 Meta de ahorro por quincena'
+                                                : '🎯 Meta de ahorro mensual'}
+                                    </Text>
                                     <View style={styles.amountInputContainer}>
                                         <Text style={styles.currencySymbol}>$</Text>
                                         <TextInput
@@ -590,7 +612,13 @@ export default function SetupScreen() {
                                 </View>
 
                                 <View style={styles.inputBlock}>
-                                    <Text style={styles.inputLabel}>🍿 Presupuesto para Ocio y Salidas</Text>
+                                    <Text style={styles.inputLabel}>
+                                        {payFrequency === 'weekly'
+                                            ? '🍿 Ocio por semana'
+                                            : payFrequency === 'biweekly'
+                                                ? '🍿 Ocio por quincena'
+                                                : '🍿 Ocio mensual'}
+                                    </Text>
                                     <View style={styles.amountInputContainer}>
                                         <Text style={styles.currencySymbol}>$</Text>
                                         <TextInput
@@ -609,29 +637,31 @@ export default function SetupScreen() {
                                 <View
                                     style={[
                                         styles.bufferCard,
-                                        unallocatedBuffer < 0 && styles.bufferCardError,
+                                        unallocatedBufferPerPeriod < 0 && styles.bufferCardError,
                                     ]}
                                 >
                                     <Ionicons
-                                        name={unallocatedBuffer < 0 ? 'alert-circle' : 'shield-checkmark-outline'}
+                                        name={unallocatedBufferPerPeriod < 0 ? 'alert-circle' : 'shield-checkmark-outline'}
                                         size={22}
-                                        color={unallocatedBuffer < 0 ? Theme.colors.statusDanger : Theme.colors.borderFocus}
+                                        color={unallocatedBufferPerPeriod < 0 ? Theme.colors.statusDanger : Theme.colors.borderFocus}
                                     />
                                     <View style={styles.bufferTextContainer}>
                                         <Text
                                             style={[
                                                 styles.bufferTitle,
-                                                unallocatedBuffer < 0 && styles.bufferTitleError,
+                                                unallocatedBufferPerPeriod < 0 && styles.bufferTitleError,
                                             ]}
                                         >
-                                            {unallocatedBuffer < 0
+                                            {unallocatedBufferPerPeriod < 0
                                                 ? 'Superaste tu disponible'
-                                                : `Colchón libre: $${unallocatedBuffer.toFixed(2)} MXN`}
+                                                : `Colchón libre: $${unallocatedBufferPerPeriod.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN ${periodSuffix}`}
                                         </Text>
                                         <Text style={styles.bufferDescription}>
-                                            {unallocatedBuffer < 0
-                                                ? `Te pasaste por $${Math.abs(unallocatedBuffer).toFixed(2)} MXN. Reduce el ahorro o el ocio.`
-                                                : 'Este dinero no comprometido permanece en tu cuenta como margen de seguridad para imprevistos.'}
+                                            {unallocatedBufferPerPeriod < 0
+                                                ? `Te pasaste por $${Math.abs(unallocatedBufferPerPeriod).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN. Reduce el ahorro o el ocio.`
+                                                : payFrequency !== 'monthly'
+                                                    ? `Margen de seguridad para imprevistos (equivale a $${unallocatedBufferMonthly.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN al mes).`
+                                                    : 'Este dinero no comprometido permanece en tu cuenta como margen de seguridad para imprevistos.'}
                                         </Text>
                                     </View>
                                 </View>
@@ -663,10 +693,10 @@ export default function SetupScreen() {
                                 <TouchableOpacity
                                     style={[
                                         styles.primaryButton,
-                                        (isLoading || unallocatedBuffer < 0) && styles.buttonDisabled,
+                                        (isLoading || unallocatedBufferPerPeriod < 0) && styles.buttonDisabled,
                                     ]}
                                     onPress={handleFinish}
-                                    disabled={isLoading || unallocatedBuffer < 0}
+                                    disabled={isLoading || unallocatedBufferPerPeriod < 0}
                                     activeOpacity={0.8}
                                 >
                                     {isLoading ? (

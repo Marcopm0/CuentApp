@@ -70,6 +70,30 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
         });
     }
 
+    // 1.1 Inyectar la cuota base de ahorro inicial del ciclo actual (Idempotente)
+    const divisor = data.payFrequency === 'weekly' ? 4 : data.payFrequency === 'biweekly' ? 2 : 1;
+    const cuotaAhorro = (data.savingsTarget || 0) / divisor;
+
+    if (cuotaAhorro > 0) {
+        const ahorroBaseDocId = `${currentUser.uid}_ahorro_base_${currentPeriod.periodKey}`;
+        const ahorroBaseRef = doc(db, 'transactions', ahorroBaseDocId);
+        batch.set(ahorroBaseRef, {
+            id: ahorroBaseDocId,
+            userId: currentUser.uid,
+            sharedFundId: null,
+            type: 'income',
+            amount: cuotaAhorro,
+            category: '🎯 Ahorro Base',
+            description: 'Aporte base presupuestado al ahorro',
+            targetBucket: 'savings',
+            periodKey: currentPeriod.periodKey,
+            monthYear,
+            date: todayStr,
+            createdAt: serverTimestamp(),
+            isShared: false,
+        });
+    }
+
     // 2. Crear un presupuesto maestro permanente para CADA gasto fijo desglosado (Opción B)
     data.fixedExpenses.forEach((expense) => {
         if (expense.amount > 0) {
