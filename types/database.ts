@@ -15,8 +15,25 @@ export interface UserProfile {
     savingsTarget?: number;
     hasPreSavedNextCycle?: boolean;
     firstPeriodKey?: string;
+    activeSharedFundId?: string | null;
     createdAt: Timestamp;
     updatedAt: Timestamp;
+}
+
+export interface SharedFundMemberDetails {
+    displayName: string;
+    email: string;
+    joinedAt: any;
+}
+
+export interface SharedFund {
+    id: string;
+    inviteCode: string;
+    createdAt: any;
+    members: string[];
+    memberDetails: Record<string, SharedFundMemberDetails>;
+    active: boolean;
+    maxMembers: number;
 }
 
 export interface Transaction {

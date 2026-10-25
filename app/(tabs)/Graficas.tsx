@@ -120,7 +120,7 @@ export default function GraficasScreen() {
 
             // B.1 Suscripción reactiva en tiempo real a la subcolección users/{uid}/fixedExpenses
             const fixedExpensesRef = collection(db, 'users', user.uid, 'fixedExpenses');
-            const unsubscribeFixed = onSnapshot(
+            unsubscribeFixed = onSnapshot(
                 fixedExpensesRef,
                 (snapshot) => {
                     const items: Budget[] = snapshot.docs.map((d) => {

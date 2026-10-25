@@ -127,10 +127,24 @@ export default function SetupScreen() {
         );
     };
 
+    // Sanitizador de entrada numérica (solo dígitos y un punto decimal, máx 2 decimales)
+    const handleNumberInput = (text: string, setter: (val: string) => void) => {
+        const cleaned = text.replace(/[^0-9.]/g, '');
+        const parts = cleaned.split('.');
+        if (parts.length > 2) return;
+        if (parts[1] && parts[1].length > 2) {
+            setter(`${parts[0]}.${parts[1].slice(0, 2)}`);
+            return;
+        }
+        setter(cleaned);
+    };
+
     const updateExpenseAmount = (id: string, value: string) => {
-        setExpenses((prev) =>
-            prev.map((item) => (item.id === id ? { ...item, amount: value } : item))
-        );
+        handleNumberInput(value, (cleaned) => {
+            setExpenses((prev) =>
+                prev.map((item) => (item.id === id ? { ...item, amount: cleaned } : item))
+            );
+        });
     };
 
     const updateExpenseDueBlock = (id: string, dueBlock: DueBlock) => {
@@ -359,7 +373,8 @@ export default function SetupScreen() {
                                         placeholderTextColor={Theme.colors.textMuted}
                                         keyboardType="numeric"
                                         value={periodAmount}
-                                        onChangeText={setPeriodAmount}
+                                        onChangeText={(val) => handleNumberInput(val, setPeriodAmount)}
+                                        maxLength={10}
                                         autoFocus
                                     />
                                     <Text style={styles.currencyCode}>MXN</Text>
@@ -437,6 +452,7 @@ export default function SetupScreen() {
                                                             keyboardType="numeric"
                                                             value={item.amount}
                                                             onChangeText={(val) => updateExpenseAmount(item.id, val)}
+                                                            maxLength={10}
                                                             autoFocus
                                                         />
                                                         <Text style={styles.smallCode}>MXN</Text>
@@ -605,7 +621,8 @@ export default function SetupScreen() {
                                             placeholderTextColor={Theme.colors.textMuted}
                                             keyboardType="numeric"
                                             value={savings}
-                                            onChangeText={setSavings}
+                                            onChangeText={(val) => handleNumberInput(val, setSavings)}
+                                            maxLength={10}
                                         />
                                         <Text style={styles.currencyCode}>MXN</Text>
                                     </View>
@@ -627,7 +644,8 @@ export default function SetupScreen() {
                                             placeholderTextColor={Theme.colors.textMuted}
                                             keyboardType="numeric"
                                             value={leisure}
-                                            onChangeText={setLeisure}
+                                            onChangeText={(val) => handleNumberInput(val, setLeisure)}
+                                            maxLength={10}
                                         />
                                         <Text style={styles.currencyCode}>MXN</Text>
                                     </View>
