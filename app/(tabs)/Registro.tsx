@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Modal,
     ScrollView,
@@ -118,6 +119,46 @@ export default function HistorialScreen() {
         });
     };
 
+    const handleDelete = (item: Transaction) => {
+        if (!item.id) {
+            Alert.alert('Error', 'No se encontró el identificador del movimiento.');
+            return;
+        }
+
+        const isExpense = item.type === 'expense';
+        const formattedAmount = `$${Number(item.amount || 0).toLocaleString('es-MX', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        })} MXN`;
+        const concept = item.description || item.category || (isExpense ? 'Gasto' : 'Ingreso');
+
+        Alert.alert(
+            '¿Eliminar movimiento?',
+            `¿Estás seguro de que deseas eliminar "${concept}" por ${formattedAmount}? Esta acción no se puede deshacer.`,
+            [
+                {
+                    text: 'Cancelar',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Eliminar',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await deleteDoc(doc(db, 'transactions', item.id!));
+                        } catch (error) {
+                            console.error('Error al eliminar transacción:', error);
+                            Alert.alert(
+                                'Error al eliminar',
+                                'No se pudo eliminar el movimiento. Por favor verifica tu conexión a internet o intenta más tarde.'
+                            );
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
     const renderItem = ({ item }: { item: Transaction }) => {
         const isExpense = item.type === 'expense';
 
@@ -129,7 +170,6 @@ export default function HistorialScreen() {
                     </Text>
                     <View style={styles.subInfoRow}>
                         <Text style={styles.itemCat}>{item.category}</Text>
-                        <Text style={styles.bulletDot}>•</Text>
                         <Text style={styles.itemDate}>{formatFecha(item)}</Text>
                     </View>
 
@@ -167,17 +207,27 @@ export default function HistorialScreen() {
                     ) : null}
                 </View>
 
-                <Text
-                    style={[
-                        styles.itemAmount,
-                        isExpense ? styles.amountExpense : styles.amountIncome,
-                    ]}
-                >
-                    {isExpense ? '-' : '+'}$
-                    {Number(item.amount || 0).toLocaleString('es-MX', {
-                        minimumFractionDigits: 2,
-                    })}
-                </Text>
+                <View style={styles.itemRight}>
+                    <Text
+                        style={[
+                            styles.itemAmount,
+                            isExpense ? styles.amountExpense : styles.amountIncome,
+                        ]}
+                    >
+                        {isExpense ? '-' : '+'}$
+                        {Number(item.amount || 0).toLocaleString('es-MX', {
+                            minimumFractionDigits: 2,
+                        })}
+                    </Text>
+                    <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleDelete(item)}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        <Ionicons name="trash-outline" size={16} color={Theme.colors.expense} />
+                    </TouchableOpacity>
+                </View>
             </View>
         );
     };
@@ -493,9 +543,9 @@ const styles = StyleSheet.create({
         color: Theme.colors.textPrimary,
     },
     subInfoRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 2,
     },
     itemCat: {
         fontSize: 12,
@@ -548,6 +598,18 @@ const styles = StyleSheet.create({
     bucketPillText: {
         fontSize: 10,
         fontWeight: '700',
+    },
+    itemRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    deleteButton: {
+        padding: 6,
+        borderRadius: Theme.radius.sm,
+        backgroundColor: 'rgba(248, 113, 113, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     itemAmount: {
         fontSize: 16,

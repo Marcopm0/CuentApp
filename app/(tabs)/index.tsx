@@ -225,9 +225,9 @@ export default function HomeScreen() {
       return (t as any).monthYear === currentMonthYear;
     };
 
-    // 6. Ingresos extraordinarios del ciclo (excluyendo el cobro regular base y el ingreso inicial)
+    // 6. Ingresos extraordinarios del ciclo (excluyendo el cobro regular base, ingreso inicial y ahorro base)
     const periodIncomes = transactions.filter(
-      (t) => t.type === 'income' && t.category !== 'Ingreso Inicial' && isTxInCurrentPeriod(t)
+      (t) => t.type === 'income' && t.category !== 'Ingreso Inicial' && t.category !== '🎯 Ahorro Base' && isTxInCurrentPeriod(t)
     );
 
     const extraOcio = periodIncomes
@@ -474,7 +474,31 @@ export default function HomeScreen() {
         sharedFundId: null,
       });
 
-      // 2. Si hay remanente positivo a favor del ciclo anterior, aplicar según decisión
+      // 2. Transacción de Ahorro Base Presupuestado (Generación atómica e idempotente)
+      const divisor = payFrequency === 'weekly' ? 4 : payFrequency === 'biweekly' ? 2 : 1;
+      const cuotaAhorro = (savingsTarget || 0) / divisor;
+
+      if (cuotaAhorro > 0) {
+        const ahorroBaseDocId = `${user.uid}_ahorro_base_${periodInfo.periodKey}`;
+        const ahorroBaseRef = doc(db, 'transactions', ahorroBaseDocId);
+        batch.set(ahorroBaseRef, {
+          id: ahorroBaseDocId,
+          userId: user.uid,
+          type: 'income',
+          amount: cuotaAhorro,
+          category: '🎯 Ahorro Base',
+          description: 'Aporte base presupuestado al ahorro',
+          targetBucket: 'savings',
+          periodKey: periodInfo.periodKey,
+          monthYear: currentMonthYear,
+          date: todayStr,
+          createdAt: serverTimestamp(),
+          isShared: false,
+          sharedFundId: null,
+        });
+      }
+
+      // 3. Si hay remanente positivo a favor del ciclo anterior, aplicar según decisión
       if (surplus > 0 && targetBucket) {
         const surplusRef = doc(collection(db, 'transactions'));
         const isSavings = targetBucket === 'savings';

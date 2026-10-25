@@ -247,9 +247,15 @@ export default function GraficasScreen() {
             .filter((t) => t.type === 'income' && t.category === '💵 Sueldo')
             .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-        // Ingresos extraordinarios (excluyendo sueldo base e ingreso inicial de setup)
+        // Ingresos extraordinarios (excluyendo sueldo base, ingreso inicial de setup y cuota base de ahorro)
         const extraIncomes = scopedTransactions
-            .filter((t) => t.type === 'income' && t.category !== '💵 Sueldo' && t.category !== 'Ingreso Inicial')
+            .filter(
+                (t) =>
+                    t.type === 'income' &&
+                    t.category !== '💵 Sueldo' &&
+                    t.category !== 'Ingreso Inicial' &&
+                    t.category !== '🎯 Ahorro Base'
+            )
             .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
         // Total Ingresos = Si ya se abonó el sueldo, se toma el valor real; si no, la base presupuestada esperada + extras
