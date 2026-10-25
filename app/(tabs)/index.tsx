@@ -1329,4 +1329,4 @@ const styles = StyleSheet.create({
   fixedStatusPendingText: {
     color: Theme.colors.statusWarning,
   },
-});
+});
