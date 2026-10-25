@@ -6,7 +6,8 @@ import { deduplicateBudgets } from '@/utils/budgets';
 import { getLocalDateString, getTransactionDate } from '@/utils/dates';
 import { DueBlock, getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
+import { router } from 'expo-router';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,6 +27,7 @@ export default function HomeScreen() {
     firstPeriodKey?: string;
     createdAt?: any;
   }>({ hasPreSavedNextCycle: true });
+  const [subFixedExpenses, setSubFixedExpenses] = useState<Budget[]>([]);
 
   //Para el registro de gastos
   const ultimosMovimientos = useMemo(() => {
@@ -59,16 +61,17 @@ export default function HomeScreen() {
       setUserName(primerNombre);
     }
 
-    // 2. Leer datos del usuario en Firestore (Ingreso mensual y Meta de Ahorro del setup)
-    const fetchUserData = async () => {
-      try {
-        const userDocSnap = await getDoc(doc(db, 'users', user.uid));
+    // 2. Suscripción en tiempo real a los datos del usuario en Firestore (Ingreso mensual y Meta de Ahorro)
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribeUser = onSnapshot(
+      userDocRef,
+      (userDocSnap) => {
         if (userDocSnap.exists()) {
           const data = userDocSnap.data();
           const nombre = data.displayName || data.name;
           if (nombre) setUserName(nombre.split(' ')[0]);
           const ingresoTotal = Number(data.monthlyIncome) || 0;
-          if (data.savingsTarget) setSavingTarget(Number(data.savingsTarget) || 0);
+          setSavingTarget(Number(data.savingsTarget) || 0);
 
           // Frecuencia de cobro (quincenal por defecto)
           const freq = (data.payFrequency as PayFrequency) || 'biweekly';
@@ -78,7 +81,7 @@ export default function HomeScreen() {
           }
 
           // Si ya tiene guardado amountPerPeriod úsalo; si no, calcula según su periodicidad
-          const periodAmount = data.amountPerPeriod
+          const periodAmount = data.amountPerPeriod !== undefined
             ? Number(data.amountPerPeriod)
             : freq === 'biweekly'
               ? ingresoTotal / 2
@@ -95,11 +98,11 @@ export default function HomeScreen() {
             createdAt: data.createdAt,
           });
         }
-      } catch (error) {
-        console.error('Error al leer los datos del usuario:', error);
+      },
+      (error) => {
+        console.error('Error al escuchar datos de usuario en tiempo real:', error);
       }
-    };
-    fetchUserData();
+    );
 
     // 3. Suscripción en tiempo real a los presupuestos maestros permanentes
     const budgetsQuery = query(
@@ -115,6 +118,39 @@ export default function HomeScreen() {
       // Deduplicar presupuestos por categoría (priorizando presupuestos permanentes)
       setBudgets(deduplicateBudgets(rawDocs));
     });
+
+    // 3.1 Suscripción reactiva en tiempo real a la subcolección fixedExpenses (Fase 2)
+    const fixedExpensesRef = collection(db, 'users', user.uid, 'fixedExpenses');
+    const unsubscribeFixedExpenses = onSnapshot(
+      fixedExpensesRef,
+      (snapshot) => {
+        const items: Budget[] = snapshot.docs.map((d) => {
+          const data = d.data();
+          const rawBlock = data.dueBlock;
+          let dueBlock: DueBlock = 'mid';
+          if (rawBlock === '1-10' || rawBlock === 'start') dueBlock = 'start';
+          else if (rawBlock === '11-20' || rawBlock === 'mid') dueBlock = 'mid';
+          else if (rawBlock === '21-end' || rawBlock === 'end') dueBlock = 'end';
+
+          return {
+            id: d.id,
+            userId: user.uid,
+            name: data.concept || data.name || 'Gasto Fijo',
+            category: data.concept || data.name || 'Gasto Fijo',
+            limitAmount: Number(data.amount) || 0,
+            dueBlock,
+            isFixedExpense: true,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+          };
+        });
+        setSubFixedExpenses(items);
+      },
+      (error) => {
+        console.error('Error al escuchar fixedExpenses en index.tsx:', error);
+      }
+    );
+
     // 4. Suscripción en tiempo real a transacciones personales
     const txQuery = query(
       collection(db, 'transactions'),
@@ -130,7 +166,9 @@ export default function HomeScreen() {
       setTransactions(txs);
     });
     return () => {
+      unsubscribeUser();
       unsubscribeBudgets();
+      unsubscribeFixedExpenses();
       unsubscribeTx();
     };
   }, [currentMonthYear]);
@@ -163,6 +201,16 @@ export default function HomeScreen() {
   }, [userProfile, periodInfo]);
 
   // ─────────────────────────────────────────────────────────────
+  // COMPROMISOS Y GASTOS FIJOS (SUBCOLECCIÓN REACTIVA + RETROCOMPATIBILIDAD)
+  // ─────────────────────────────────────────────────────────────
+  const presupuestosFijos = useMemo(() => {
+    if (subFixedExpenses.length > 0) {
+      return subFixedExpenses;
+    }
+    return budgets.filter((b) => b.isFixedExpense);
+  }, [subFixedExpenses, budgets]);
+
+  // ─────────────────────────────────────────────────────────────
   // CÁLCULO DEL DISPONIBLE POR PERIODO Y FLUJO DE EFECTIVO REAL
   // ─────────────────────────────────────────────────────────────
   const {
@@ -190,13 +238,12 @@ export default function HomeScreen() {
       // Retener del ingreso de este ciclo los gastos que vencen en el ciclo entrante más los del ciclo activo
       const nextCycleBlocks = getNextCycleBlocks(payFrequency, payDayOfWeek);
       const relevantBlocks = new Set([...periodInfo.activeBlocks, ...nextCycleBlocks]);
-      fijosDelPeriodo = budgets
+      fijosDelPeriodo = presupuestosFijos
         .filter((b) => b.isFixedExpense && b.dueBlock && relevantBlocks.has(b.dueBlock))
         .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
     } else {
       // En ciclo normal o si hasPreSavedNextCycle === true: Aplicar el prorrateo parejo estándar
-      const totalFijosMensuales = budgets
-        .filter((b) => b.isFixedExpense)
+      const totalFijosMensuales = presupuestosFijos
         .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
 
       fijosDelPeriodo = totalFijosMensuales / divisor; // divisor: weekly=4, biweekly=2, monthly=1
@@ -365,15 +412,11 @@ export default function HomeScreen() {
       progressPercentage: progress,
       mensajePie: pie,
     };
-  }, [budgets, transactions, payFrequency, payDayOfWeek, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear, userProfile, isFirstCycle]);
+  }, [budgets, transactions, payFrequency, payDayOfWeek, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear, userProfile, isFirstCycle, presupuestosFijos]);
 
   // ─────────────────────────────────────────────────────────────
   // COMPROMISOS Y GASTOS FIJOS (TARJETA DE SEGUIMIENTO MENSUAL - OPCIÓN B)
   // ─────────────────────────────────────────────────────────────
-  const presupuestosFijos = useMemo(() => {
-    return budgets.filter((b) => b.isFixedExpense);
-  }, [budgets]);
-
   const totalFijosMes = useMemo(() => {
     return presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
   }, [presupuestosFijos]);
@@ -424,13 +467,16 @@ export default function HomeScreen() {
     return Math.min(100, (totalPagado / totalFijosMes) * 100);
   }, [totalPagado, totalFijosMes]);
 
-  const getDueBlockLabel = (block?: DueBlock) => {
+  const getDueBlockLabel = (block?: DueBlock | string) => {
     switch (block) {
       case 'start':
+      case '1-10':
         return '1-10 (Principio)';
       case 'mid':
+      case '11-20':
         return '11-20 (Mediados)';
       case 'end':
+      case '21-end':
         return '21-31 (Fin)';
       default:
         return '1-31 (Mes)';
@@ -459,11 +505,11 @@ export default function HomeScreen() {
 
     // Si hay cuota presupuestada y el sueldo de este periodo ya fue cobrado
     if (cuotaAhorro > 0 && yaCobrado) {
-      const hasAhorroBase = transactions.some(
+      const existingAhorroBase = transactions.find(
         (t) => t.periodKey === periodInfo.periodKey && t.category === '🎯 Ahorro Base'
       );
 
-      if (!hasAhorroBase) {
+      if (!existingAhorroBase) {
         const ahorroBaseDocId = `${user.uid}_ahorro_base_${periodInfo.periodKey}`;
         const todayStr = getLocalDateString(new Date());
         const ahorroBaseRef = doc(db, 'transactions', ahorroBaseDocId);
@@ -488,6 +534,15 @@ export default function HomeScreen() {
           { merge: true }
         ).catch((err) => {
           console.error('Error al sincronizar Ahorro Base del periodo:', err);
+        });
+      } else if (existingAhorroBase.id && Number(existingAhorroBase.amount) !== cuotaAhorro) {
+        // Si el usuario modificó la cuota de ahorro en ajustes, recalibrar el monto en tiempo real
+        const ahorroBaseRef = doc(db, 'transactions', existingAhorroBase.id);
+        updateDoc(ahorroBaseRef, {
+          amount: cuotaAhorro,
+          updatedAt: serverTimestamp(),
+        }).catch((err) => {
+          console.error('Error al recalibrar monto de Ahorro Base del periodo:', err);
         });
       }
     }
@@ -580,7 +635,17 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        <ThemedText type='title'>Inicio</ThemedText>
+        <View style={styles.topHeaderRow}>
+          <ThemedText type='title'>Inicio</ThemedText>
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => router.push('/(tabs)/config')}
+            activeOpacity={0.7}
+            accessibilityLabel="Configuración financiera"
+          >
+            <Ionicons name="settings-outline" size={20} color={Theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
         <View style={styles.headerRow}>
           <ThemedText style={styles.saludo}>Hola de nuevo, {userName}</ThemedText>
           <TouchableOpacity style={styles.miniwigdet} activeOpacity={0.7}>
@@ -931,6 +996,21 @@ const styles = StyleSheet.create({
     paddingTop: 25,
     gap: 16,
     backgroundColor: Theme.colors.background,
+  },
+  topHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '90%',
+  },
+  settingsButton: {
+    backgroundColor: Theme.colors.cardSurface,
+    borderRadius: Theme.radius.xl,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: Theme.colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerRow: {
     flexDirection: 'row',

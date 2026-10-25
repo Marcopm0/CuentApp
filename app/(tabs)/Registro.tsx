@@ -125,6 +125,15 @@ export default function HistorialScreen() {
             return;
         }
 
+        // Blindaje de integridad: Ahorro Base no puede eliminarse manualmente
+        if (item.category === '🎯 Ahorro Base') {
+            Alert.alert(
+                'Movimiento de Sistema',
+                'El aporte base de ahorro está protegido para mantener la integridad contable. Si deseas modificarlo o reducirlo a $0, hazlo desde Ajustes (icono de engrane en Inicio).'
+            );
+            return;
+        }
+
         const isExpense = item.type === 'expense';
         const formattedAmount = `$${Number(item.amount || 0).toLocaleString('es-MX', {
             minimumFractionDigits: 2,
@@ -219,14 +228,27 @@ export default function HistorialScreen() {
                             minimumFractionDigits: 2,
                         })}
                     </Text>
-                    <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => handleDelete(item)}
-                        activeOpacity={0.7}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                        <Ionicons name="trash-outline" size={16} color={Theme.colors.expense} />
-                    </TouchableOpacity>
+                    {item.category === '🎯 Ahorro Base' ? (
+                        <TouchableOpacity
+                            style={[styles.deleteButton, styles.lockedButton]}
+                            onPress={() => handleDelete(item)}
+                            activeOpacity={0.7}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Movimiento de sistema protegido"
+                        >
+                            <Ionicons name="lock-closed-outline" size={16} color={Theme.colors.textMuted} />
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.deleteButton}
+                            onPress={() => handleDelete(item)}
+                            activeOpacity={0.7}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Eliminar movimiento"
+                        >
+                            <Ionicons name="trash-outline" size={16} color={Theme.colors.expense} />
+                        </TouchableOpacity>
+                    )}
                 </View>
             </View>
         );
@@ -610,6 +632,9 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(248, 113, 113, 0.1)',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    lockedButton: {
+        backgroundColor: 'rgba(100, 116, 139, 0.15)',
     },
     itemAmount: {
         fontSize: 16,

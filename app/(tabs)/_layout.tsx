@@ -74,6 +74,13 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Feather size={24} name="pie-chart" color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="config"
+        options={{
+          href: null,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
     </Tabs>
   );
 }

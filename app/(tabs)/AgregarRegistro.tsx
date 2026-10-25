@@ -6,6 +6,7 @@ import {
     doc,
     getDoc,
     getDocs,
+    onSnapshot,
     query,
     serverTimestamp,
     where,
@@ -65,6 +66,7 @@ export default function AgregarRegistroScreen() {
 
     // Presupuestos activos para el mes actual y selección de presupuesto fijo
     const [budgets, setBudgets] = useState<Budget[]>([]);
+    const [subFixedExpenses, setSubFixedExpenses] = useState<Budget[]>([]);
     const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
 
     // Destino del ingreso cuando entra dinero extra
@@ -82,14 +84,14 @@ export default function AgregarRegistroScreen() {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }, []);
 
-    // Cargar presupuestos activos y gastos fijos ya liquidados para el monthYear actual
+    // Cargar presupuestos activos y suscripción reactiva a gastos fijos y transacciones
     useEffect(() => {
         const user = auth.currentUser;
         if (!user) return;
 
-        const fetchBudgetsAndTxs = async () => {
+        // 1. Obtener presupuestos permanentes (Opción B)
+        const fetchBudgets = async () => {
             try {
-                // 1. Obtener presupuestos permanentes (Opción B)
                 const qBudgets = query(
                     collection(db, 'budgets'),
                     where('userId', '==', user.uid)
@@ -99,18 +101,56 @@ export default function AgregarRegistroScreen() {
                     id: d.id,
                     ...(d.data() as Omit<Budget, 'id'>),
                 }));
-                // Deduplicar presupuestos por categoría
                 setBudgets(deduplicateBudgets(rawDocs));
+            } catch (error) {
+                console.error('Error al cargar presupuestos permanentes en AgregarRegistro:', error);
+            }
+        };
 
-                // 2. Obtener transacciones de gastos fijos del mes actual para cruzar pagos
-                const qTxs = query(
-                    collection(db, 'transactions'),
-                    where('userId', '==', user.uid),
-                    where('monthYear', '==', currentMonthYear),
-                    where('type', '==', 'expense'),
-                    where('isFixedExpense', '==', true)
-                );
-                const snapshotTxs = await getDocs(qTxs);
+        fetchBudgets();
+
+        // 2. Suscripción reactiva en tiempo real a la subcolección canónica users/{uid}/fixedExpenses
+        const fixedExpensesRef = collection(db, 'users', user.uid, 'fixedExpenses');
+        const unsubscribeFixed = onSnapshot(
+            fixedExpensesRef,
+            (snapshot) => {
+                const items: Budget[] = snapshot.docs.map((d) => {
+                    const data = d.data();
+                    let dueBlock: any = 'mid';
+                    const rawBlock = data.dueBlock;
+                    if (rawBlock === '1-10' || rawBlock === 'start') dueBlock = 'start';
+                    else if (rawBlock === '11-20' || rawBlock === 'mid') dueBlock = 'mid';
+                    else if (rawBlock === '21-end' || rawBlock === 'end') dueBlock = 'end';
+
+                    return {
+                        id: d.id,
+                        userId: user.uid,
+                        name: data.concept || data.name || 'Gasto Fijo',
+                        category: data.concept || data.name || 'Gasto Fijo',
+                        limitAmount: Number(data.amount) || 0,
+                        dueBlock,
+                        isFixedExpense: true,
+                        createdAt: data.createdAt,
+                    };
+                });
+                setSubFixedExpenses(items);
+            },
+            (error) => {
+                console.error('Error al escuchar fixedExpenses en AgregarRegistro:', error);
+            }
+        );
+
+        // 3. Suscripción en tiempo real a transacciones de gastos fijos del mes actual para cruzar pagos
+        const qTxs = query(
+            collection(db, 'transactions'),
+            where('userId', '==', user.uid),
+            where('monthYear', '==', currentMonthYear),
+            where('type', '==', 'expense'),
+            where('isFixedExpense', '==', true)
+        );
+        const unsubscribeTxs = onSnapshot(
+            qTxs,
+            (snapshotTxs) => {
                 const paidMap: Record<string, number> = {};
                 snapshotTxs.docs.forEach((docSnap) => {
                     const data = docSnap.data();
@@ -123,13 +163,25 @@ export default function AgregarRegistroScreen() {
                     }
                 });
                 setPaidFixedMap(paidMap);
-            } catch (error) {
-                console.error('Error al cargar presupuestos activos y fijos pagados:', error);
+            },
+            (error) => {
+                console.error('Error al escuchar transacciones de fijos en AgregarRegistro:', error);
             }
-        };
+        );
 
-        fetchBudgetsAndTxs();
+        return () => {
+            unsubscribeFixed();
+            unsubscribeTxs();
+        };
     }, [currentMonthYear]);
+
+    // Lista unificada de compromisos fijos disponibles para liquidar
+    const availableFixedBudgets = useMemo(() => {
+        if (subFixedExpenses.length > 0) {
+            return subFixedExpenses;
+        }
+        return budgets.filter((b) => b.isFixedExpense);
+    }, [subFixedExpenses, budgets]);
 
     // Saldo pendiente del presupuesto fijo actualmente seleccionado (calculado dinámicamente - Opción B)
     const pendingFixedAmount = useMemo(() => {
@@ -217,16 +269,28 @@ export default function AgregarRegistroScreen() {
 
             // Punto 1: Validación estricta en Firestore antes de guardar (Opción B dinámica)
             if (isFixed && targetBudgetId) {
-                const budgetRef = doc(db, 'budgets', targetBudgetId);
-                const budgetSnap = await getDoc(budgetRef);
-                if (!budgetSnap.exists()) {
-                    Alert.alert('Error', 'El compromiso presupuestal seleccionado ya no existe.');
-                    setLoading(false);
-                    return;
-                }
+                let freshLimit = Number(selectedBudget.limitAmount || 0);
 
-                const bData = budgetSnap.data();
-                const freshLimit = Number(bData.limitAmount || 0);
+                // Verificar si existe en la subcolección users/{uid}/fixedExpenses
+                const fixedExpenseRef = doc(db, 'users', user.uid, 'fixedExpenses', targetBudgetId);
+                const fixedExpenseSnap = await getDoc(fixedExpenseRef);
+
+                if (fixedExpenseSnap.exists()) {
+                    const fData = fixedExpenseSnap.data();
+                    freshLimit = Number(fData.amount || 0);
+                } else {
+                    // Fallback a colección budgets permanente
+                    const budgetRef = doc(db, 'budgets', targetBudgetId);
+                    const budgetSnap = await getDoc(budgetRef);
+                    if (budgetSnap.exists()) {
+                        const bData = budgetSnap.data();
+                        freshLimit = Number(bData.limitAmount || 0);
+                    } else if (freshLimit <= 0) {
+                        Alert.alert('Error', 'El compromiso presupuestal seleccionado ya no existe.');
+                        setLoading(false);
+                        return;
+                    }
+                }
 
                 // Consulta en vivo a transacciones del mes en curso para asegurar que no se haya liquidado concurrentemente
                 const qTxsCheck = query(
@@ -598,24 +662,23 @@ export default function AgregarRegistroScreen() {
                                                 );
                                             })}
 
-                                            {budgets.filter((b) => b.isFixedExpense).length > 0 && (
+                                            {availableFixedBudgets.length > 0 && (
                                                 <>
                                                     <Text style={styles.modalSectionLabel}>Gastos Fijos Programados</Text>
-                                                    {budgets
-                                                        .filter((b) => b.isFixedExpense)
-                                                        .map((b) => {
-                                                            const spentThisMonth = Math.max(paidFixedMap[b.id] || 0, paidFixedMap[b.category] || 0);
-                                                            const limitAmt = Number(b.limitAmount || 0);
-                                                            const isPaid = spentThisMonth >= limitAmt && limitAmt > 0;
-                                                            const pending = Math.max(0, limitAmt - spentThisMonth);
-                                                            const isSelected = selectedBudget?.id === b.id;
-                                                            const blockText = b.dueBlock === 'start'
-                                                                ? '1-10 (Principio)'
-                                                                : b.dueBlock === 'mid'
-                                                                    ? '11-20 (Mediados)'
-                                                                    : b.dueBlock === 'end'
-                                                                        ? '21-31 (Fin)'
-                                                                        : 'Mes';
+                                                    {availableFixedBudgets.map((b) => {
+                                                        const spentThisMonth = Math.max(paidFixedMap[b.id] || 0, paidFixedMap[b.category] || 0);
+                                                        const limitAmt = Number(b.limitAmount || 0);
+                                                        const isPaid = spentThisMonth >= limitAmt && limitAmt > 0;
+                                                        const pending = Math.max(0, limitAmt - spentThisMonth);
+                                                        const isSelected = selectedBudget?.id === b.id;
+                                                        const rawBlock = b.dueBlock as string | undefined;
+                                                        const blockText = rawBlock === 'start' || rawBlock === '1-10'
+                                                            ? '1-10 (Principio)'
+                                                            : rawBlock === 'mid' || rawBlock === '11-20'
+                                                                ? '11-20 (Mediados)'
+                                                                : rawBlock === 'end' || rawBlock === '21-end'
+                                                                    ? '21-31 (Fin)'
+                                                                    : 'Mes';
                                                             return (
                                                                 <TouchableOpacity
                                                                     key={b.id}

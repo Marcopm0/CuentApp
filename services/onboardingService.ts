@@ -95,6 +95,7 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
     }
 
     // 2. Crear un presupuesto maestro permanente para CADA gasto fijo desglosado (Opción B)
+    // y registrar en la subcolección canónica users/{uid}/fixedExpenses
     data.fixedExpenses.forEach((expense) => {
         if (expense.amount > 0) {
             const cleanCategory = sanitizeBudgetId(expense.name);
@@ -111,6 +112,21 @@ export const completeOnboarding = async (data: OnboardingPayload): Promise<void>
                 isFixedExpense: true,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
+            });
+
+            // Registrar en subcolección users/{uid}/fixedExpenses
+            const fixedExpenseRef = doc(collection(db, 'users', currentUser.uid, 'fixedExpenses'));
+            let blockStr = '11-20';
+            if (expense.dueBlock === 'start') blockStr = '1-10';
+            else if (expense.dueBlock === 'end') blockStr = '21-end';
+            else blockStr = '11-20';
+
+            batch.set(fixedExpenseRef, {
+                concept: expense.name,
+                amount: expense.amount,
+                dueBlock: blockStr,
+                createdAt: serverTimestamp(),
+                isShared: false,
             });
         }
     });

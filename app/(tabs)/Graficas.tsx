@@ -50,6 +50,7 @@ export default function GraficasScreen() {
     // 2. Datos desde Firestore
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [budgets, setBudgets] = useState<Budget[]>([]);
+    const [subFixedExpenses, setSubFixedExpenses] = useState<Budget[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
 
     // Mes en curso YYYY-MM
@@ -76,6 +77,7 @@ export default function GraficasScreen() {
 
         let unsubscribeUser = () => { };
         let unsubscribeBudgets = () => { };
+        let unsubscribeFixed = () => { };
         let unsubscribeTxs = () => { };
 
         try {
@@ -116,6 +118,38 @@ export default function GraficasScreen() {
                 }
             );
 
+            // B.1 Suscripción reactiva en tiempo real a la subcolección users/{uid}/fixedExpenses
+            const fixedExpensesRef = collection(db, 'users', user.uid, 'fixedExpenses');
+            const unsubscribeFixed = onSnapshot(
+                fixedExpensesRef,
+                (snapshot) => {
+                    const items: Budget[] = snapshot.docs.map((d) => {
+                        const data = d.data();
+                        const rawBlock = data.dueBlock;
+                        let dueBlock: any = 'mid';
+                        if (rawBlock === '1-10' || rawBlock === 'start') dueBlock = 'start';
+                        else if (rawBlock === '11-20' || rawBlock === 'mid') dueBlock = 'mid';
+                        else if (rawBlock === '21-end' || rawBlock === 'end') dueBlock = 'end';
+
+                        return {
+                            id: d.id,
+                            userId: user.uid,
+                            name: data.concept || data.name || 'Gasto Fijo',
+                            category: data.concept || data.name || 'Gasto Fijo',
+                            limitAmount: Number(data.amount) || 0,
+                            dueBlock,
+                            isFixedExpense: true,
+                            createdAt: data.createdAt,
+                            updatedAt: data.updatedAt,
+                        };
+                    });
+                    setSubFixedExpenses(items);
+                },
+                (error) => {
+                    console.error('Error al suscribir fixedExpenses en Graficas:', error);
+                }
+            );
+
             // C. Transacciones personales
             const txQuery = query(
                 collection(db, 'transactions'),
@@ -148,6 +182,7 @@ export default function GraficasScreen() {
         return () => {
             unsubscribeUser();
             unsubscribeBudgets();
+            unsubscribeFixed();
             unsubscribeTxs();
         };
     }, [currentMonthYear]);
@@ -227,6 +262,12 @@ export default function GraficasScreen() {
     const scopedTransactions = useMemo(() => {
         return transactions.filter((t) => isInScope(t, effectiveScope));
     }, [transactions, isInScope, effectiveScope]);
+
+    // Presupuestos fijos unificados (subcolección reactiva + retrocompatibilidad budgets)
+    const presupuestosFijos = useMemo(() => {
+        if (subFixedExpenses.length > 0) return subFixedExpenses;
+        return budgets.filter((b) => b.isFixedExpense);
+    }, [subFixedExpenses, budgets]);
 
     // ─────────────────────────────────────────────────────────────
     // CÁLCULOS: MÓDULO 1 (Resumen Global y Balance)
@@ -314,12 +355,11 @@ export default function GraficasScreen() {
         if (isCycle && userProfile?.hasPreSavedNextCycle === false && isFirstCycle) {
             const nextCycleBlocks = getNextCycleBlocks(payFrequency, payDayOfWeek);
             const relevantBlocks = new Set([...periodInfo.activeBlocks, ...nextCycleBlocks]);
-            fijos = budgets
+            fijos = presupuestosFijos
                 .filter((b) => b.isFixedExpense && b.dueBlock && relevantBlocks.has(b.dueBlock))
                 .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
         } else {
-            const totalFijosMensuales = budgets
-                .filter((b) => b.isFixedExpense)
+            const totalFijosMensuales = presupuestosFijos
                 .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
             fijos = totalFijosMensuales / div;
         }
@@ -365,6 +405,7 @@ export default function GraficasScreen() {
         payDayOfWeek,
         periodInfo,
         budgets,
+        presupuestosFijos,
         savingsTarget,
         amountPerPeriod,
         monthlyIncome,
@@ -484,8 +525,7 @@ export default function GraficasScreen() {
         const div = isCycle ? cycleDivisor : 1;
 
         // A. Compromisos Fijos anclados SIEMPRE a escala mensual (Punto 1)
-        const compromisoPresupuestado = budgets
-            .filter((b) => b.isFixedExpense)
+        const compromisoPresupuestado = presupuestosFijos
             .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
 
         const compromisoPagado = transactions
@@ -615,6 +655,7 @@ export default function GraficasScreen() {
         cycleDivisor,
         periodInfo,
         budgets,
+        presupuestosFijos,
         transactions,
         currentMonthYear,
         payFrequency,
