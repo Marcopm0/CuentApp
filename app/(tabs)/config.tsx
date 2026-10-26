@@ -37,8 +37,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
 import { Budget, UserProfile } from '@/types/database';
+import { sanitizeBudgetId } from '@/utils/budgets';
 import { getLocalDateString } from '@/utils/dates';
-import { getPeriodInfo, PayFrequency } from '@/utils/periods';
+import { DueBlock, getPeriodInfo, PayFrequency } from '@/utils/periods';
 
 interface InitialFormState {
     payFrequency: PayFrequency;
@@ -418,7 +419,7 @@ export default function ConfigScreen() {
         }
     };
 
-    // Flujo de eliminación de un gasto fijo (Fase 2)
+    // Flujo de eliminación de un gasto fijo (Fase 2) con eliminación en cascada en budgets
     const handleDeleteFixedExpense = (item: FixedExpenseItem) => {
         const currentUser = auth.currentUser;
         if (!currentUser) return;
@@ -433,7 +434,40 @@ export default function ConfigScreen() {
                     style: 'destructive',
                     onPress: async () => {
                         try {
+                            // 1. Eliminar de la subcolección users/{uid}/fixedExpenses
                             await deleteDoc(doc(db, 'users', currentUser.uid, 'fixedExpenses', item.id));
+
+                            // 2. Eliminación en cascada en colección budgets para evitar snapshots obsoletos
+                            const budgetsQ = query(
+                                collection(db, 'budgets'),
+                                where('userId', '==', currentUser.uid)
+                            );
+                            const budgetsSnap = await getDocs(budgetsQ);
+                            const batch = writeBatch(db);
+                            let hasBudgetsToDelete = false;
+
+                            const itemConceptLower = (item.concept || '').toLowerCase().trim();
+                            const cleanCategory = sanitizeBudgetId(item.concept || '');
+
+                            budgetsSnap.docs.forEach((d) => {
+                                const data = d.data();
+                                if (!data.isFixedExpense) return;
+                                const bName = (data.name || '').toLowerCase().trim();
+                                const bCat = (data.category || '').toLowerCase().trim();
+                                if (
+                                    bName === itemConceptLower ||
+                                    bCat === itemConceptLower ||
+                                    d.id === `${currentUser.uid}_${cleanCategory}` ||
+                                    d.id === item.id
+                                ) {
+                                    batch.delete(d.ref);
+                                    hasBudgetsToDelete = true;
+                                }
+                            });
+
+                            if (hasBudgetsToDelete) {
+                                await batch.commit();
+                            }
                         } catch (error) {
                             console.error('Error al eliminar gasto fijo:', error);
                             Alert.alert('Error', 'No se pudo eliminar el gasto fijo.');
@@ -444,7 +478,7 @@ export default function ConfigScreen() {
         );
     };
 
-    // Flujo para agregar un nuevo gasto fijo (Fase 2)
+    // Flujo para agregar un nuevo gasto fijo (Fase 2) con creación en cascada en budgets
     const handleAddFixedExpense = async () => {
         const currentUser = auth.currentUser;
         if (!currentUser) return;
@@ -462,12 +496,32 @@ export default function ConfigScreen() {
 
         setIsSubmittingFixed(true);
         try {
+            // 1. Registrar en subcolección users/{uid}/fixedExpenses
             await addDoc(collection(db, 'users', currentUser.uid, 'fixedExpenses'), {
                 concept: newConcept.trim(),
                 amount: numericVal,
                 dueBlock: newDueBlock,
                 createdAt: serverTimestamp(),
                 isShared: false,
+            });
+
+            // 2. Sincronizar en cascada en budgets para paridad de datos
+            const cleanCategory = sanitizeBudgetId(newConcept.trim());
+            const budgetDocId = `${currentUser.uid}_${cleanCategory}`;
+            let dueBlockCode: DueBlock = 'mid';
+            if (newDueBlock === '1-10') dueBlockCode = 'start';
+            else if (newDueBlock === '21-end') dueBlockCode = 'end';
+
+            await setDoc(doc(db, 'budgets', budgetDocId), {
+                id: budgetDocId,
+                userId: currentUser.uid,
+                name: newConcept.trim(),
+                category: newConcept.trim(),
+                limitAmount: numericVal,
+                dueBlock: dueBlockCode,
+                isFixedExpense: true,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
             });
 
             setNewConcept('');

@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
-import { Budget, Transaction, UserProfile } from '@/types/database';
+import { Budget, SharedService, Transaction, UserProfile } from '@/types/database';
 import { deduplicateBudgets } from '@/utils/budgets';
 import { getTransactionDate } from '@/utils/dates';
 import { getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
@@ -51,7 +51,9 @@ export default function GraficasScreen() {
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [budgets, setBudgets] = useState<Budget[]>([]);
     const [subFixedExpenses, setSubFixedExpenses] = useState<Budget[]>([]);
+    const [subFixedExpensesLoaded, setSubFixedExpensesLoaded] = useState<boolean>(false);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [sharedServices, setSharedServices] = useState<SharedService[]>([]);
 
     // Mes en curso YYYY-MM
     const currentMonthYear = useMemo(() => {
@@ -87,9 +89,10 @@ export default function GraficasScreen() {
                 userRef,
                 (docSnap) => {
                     if (docSnap.exists()) {
+                        const userData = docSnap.data() as Omit<UserProfile, 'uid'>;
                         setUserProfile({
                             uid: docSnap.id,
-                            ...(docSnap.data() as Omit<UserProfile, 'uid'>),
+                            ...userData,
                         });
                     }
                 },
@@ -144,6 +147,7 @@ export default function GraficasScreen() {
                         };
                     });
                     setSubFixedExpenses(items);
+                    setSubFixedExpensesLoaded(true);
                 },
                 (error) => {
                     console.error('Error al suscribir fixedExpenses en Graficas:', error);
@@ -186,6 +190,34 @@ export default function GraficasScreen() {
             unsubscribeTxs();
         };
     }, [currentMonthYear]);
+
+    // 3.2 Suscripción reactiva en tiempo real a los servicios compartidos del hogar
+    useEffect(() => {
+        const activeFundId = userProfile?.activeSharedFundId;
+        if (!activeFundId) {
+            setSharedServices([]);
+            return;
+        }
+
+        const servicesRef = collection(db, 'sharedFunds', activeFundId, 'services');
+        const unsubscribeSharedServices = onSnapshot(
+            servicesRef,
+            (snapshot) => {
+                const items: SharedService[] = snapshot.docs.map((docSnap) => ({
+                    id: docSnap.id,
+                    ...(docSnap.data() as Omit<SharedService, 'id'>),
+                }));
+                setSharedServices(items);
+            },
+            (error) => {
+                console.error('Error al escuchar servicios compartidos en Graficas.tsx:', error);
+            }
+        );
+
+        return () => {
+            unsubscribeSharedServices();
+        };
+    }, [userProfile?.activeSharedFundId]);
 
     // Pull-to-refresh
     const onRefresh = () => {
@@ -263,11 +295,19 @@ export default function GraficasScreen() {
         return transactions.filter((t) => isInScope(t, effectiveScope));
     }, [transactions, isInScope, effectiveScope]);
 
-    // Presupuestos fijos unificados (subcolección reactiva + retrocompatibilidad budgets)
+    // Presupuestos fijos unificados (subcolección reactiva canónica)
     const presupuestosFijos = useMemo(() => {
-        if (subFixedExpenses.length > 0) return subFixedExpenses;
+        if (subFixedExpensesLoaded) return subFixedExpenses;
         return budgets.filter((b) => b.isFixedExpense);
-    }, [subFixedExpenses, budgets]);
+    }, [subFixedExpenses, subFixedExpensesLoaded, budgets]);
+
+    // Total de cuotas mensuales de servicios del hogar correspondientes al usuario
+    const totalSharedMonthly = useMemo(() => {
+        const currentUid = auth.currentUser?.uid || userProfile?.uid || '';
+        return sharedServices.reduce((acc, s) => {
+            return acc + (Number(s.split?.[currentUid]) || 0);
+        }, 0);
+    }, [sharedServices, userProfile?.uid]);
 
     // ─────────────────────────────────────────────────────────────
     // CÁLCULOS: MÓDULO 1 (Resumen Global y Balance)
@@ -304,16 +344,32 @@ export default function GraficasScreen() {
 
         // Fijos Cubiertos:
         // Se calcula reactivamente a partir de las transacciones de gastos fijos del periodo (Opción B)
+        // más las cuotas de servicios del hogar liquidadas o transferidas
+        const currentUid = auth.currentUser?.uid || '';
+        const sharedServicesPagados = sharedServices.reduce((acc, s) => {
+            const quota = Number(s.split?.[currentUid]) || 0;
+            if (quota <= 0) return acc;
+            const isHolder = s.holderUid === currentUid;
+            const isPaid = isHolder
+                ? s.status?.paidToProvider === true
+                : Array.isArray(s.status?.transferredBy) && s.status.transferredBy.includes(currentUid);
+            return acc + (isPaid ? quota : 0);
+        }, 0);
+
         let fijosPagados = 0;
         if (effectiveScope === 'cycle') {
-            fijosPagados = scopedTransactions
-                .filter((t) => t.type === 'expense' && (t.isFixedExpense || t.category === 'Gasto Fijo'))
-                .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+            fijosPagados =
+                scopedTransactions
+                    .filter((t) => t.type === 'expense' && (t.isFixedExpense || t.category === 'Gasto Fijo'))
+                    .reduce((acc, t) => acc + (Number(t.amount) || 0), 0) +
+                (sharedServicesPagados / cycleDivisor);
         } else {
             // Mes completo
-            fijosPagados = scopedTransactions
-                .filter((t) => t.type === 'expense' && (t.isFixedExpense || t.category === 'Gasto Fijo'))
-                .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+            fijosPagados =
+                scopedTransactions
+                    .filter((t) => t.type === 'expense' && (t.isFixedExpense || t.category === 'Gasto Fijo'))
+                    .reduce((acc, t) => acc + (Number(t.amount) || 0), 0) +
+                sharedServicesPagados;
         }
 
         // Gastos Variables consumidos en el periodo
@@ -331,7 +387,7 @@ export default function GraficasScreen() {
             fijosCubiertos: fijosPagados,
             gastosVariablesConsumidos: variables,
         };
-    }, [effectiveScope, amountPerPeriod, monthlyIncome, cycleDivisor, scopedTransactions, budgets, periodInfo]);
+    }, [effectiveScope, amountPerPeriod, monthlyIncome, cycleDivisor, scopedTransactions, budgets, periodInfo, sharedServices]);
 
     // ─────────────────────────────────────────────────────────────
     // CÁLCULOS: MÓDULO 2 (Distribución de Bolsas Maestras)
@@ -349,48 +405,43 @@ export default function GraficasScreen() {
     } = useMemo(() => {
         const isCycle = effectiveScope === 'cycle';
         const div = isCycle ? cycleDivisor : 1;
+        const ingresoTotal = isCycle
+            ? amountPerPeriod
+            : (monthlyIncome || amountPerPeriod * cycleDivisor);
 
-        // 1. 🏠 Gastos Fijos
-        let fijos = 0;
-        if (isCycle && userProfile?.hasPreSavedNextCycle === false && isFirstCycle) {
-            const nextCycleBlocks = getNextCycleBlocks(payFrequency, payDayOfWeek);
-            const relevantBlocks = new Set([...periodInfo.activeBlocks, ...nextCycleBlocks]);
-            fijos = presupuestosFijos
-                .filter((b) => b.isFixedExpense && b.dueBlock && relevantBlocks.has(b.dueBlock))
-                .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
-        } else {
-            const totalFijosMensuales = presupuestosFijos
-                .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
-            fijos = totalFijosMensuales / div;
-        }
+        // 1. 🏠 Gastos Fijos (Personales + Cuota del Hogar)
+        const fijosPersonalesTotal =
+            presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0) / div;
+        const fijosHogarTotal = totalSharedMonthly / div;
+        const fijosMasterCalc = fijosPersonalesTotal + fijosHogarTotal;
 
         // 2. 🐖 Ahorro Programado
-        const ahorro = (savingsTarget || 0) / div;
+        const ahorroMasterCalc = (savingsTarget || 0) / div;
 
         // 3. 🍿 Ocio / Variable
         const leisureDoc = budgets.find((b) => !b.isFixedExpense);
         const ocioMensual = leisureDoc ? Number(leisureDoc.limitAmount) || 0 : 0;
-        const ocio = ocioMensual / div;
+        const ocioMasterCalc = ocioMensual / div;
 
         // 4. 🛡️ Colchón / Buffer
-        const baseCobro = isCycle
-            ? amountPerPeriod
-            : (monthlyIncome || amountPerPeriod * cycleDivisor);
-        const buffer = Math.max(0, baseCobro - (fijos + ahorro + ocio));
+        const bufferMasterCalc = Math.max(
+            0,
+            ingresoTotal - (fijosMasterCalc + ahorroMasterCalc + ocioMasterCalc)
+        );
 
-        const total = fijos + ahorro + ocio + buffer;
+        const totalMasterCalc = fijosMasterCalc + ahorroMasterCalc + ocioMasterCalc + bufferMasterCalc;
 
-        const pFijos = total > 0 ? (fijos / total) * 100 : 0;
-        const pAhorro = total > 0 ? (ahorro / total) * 100 : 0;
-        const pOcio = total > 0 ? (ocio / total) * 100 : 0;
-        const pBuffer = total > 0 ? (buffer / total) * 100 : 0;
+        const pFijos = totalMasterCalc > 0 ? (fijosMasterCalc / totalMasterCalc) * 100 : 0;
+        const pAhorro = totalMasterCalc > 0 ? (ahorroMasterCalc / totalMasterCalc) * 100 : 0;
+        const pOcio = totalMasterCalc > 0 ? (ocioMasterCalc / totalMasterCalc) * 100 : 0;
+        const pBuffer = totalMasterCalc > 0 ? (bufferMasterCalc / totalMasterCalc) * 100 : 0;
 
         return {
-            fijosMaster: fijos,
-            ahorroMaster: ahorro,
-            ocioMaster: ocio,
-            bufferMaster: buffer,
-            totalMaster: total,
+            fijosMaster: fijosMasterCalc,
+            ahorroMaster: ahorroMasterCalc,
+            ocioMaster: ocioMasterCalc,
+            bufferMaster: bufferMasterCalc,
+            totalMaster: totalMasterCalc,
             pctFijos: pFijos,
             pctAhorro: pAhorro,
             pctOcio: pOcio,
@@ -399,16 +450,12 @@ export default function GraficasScreen() {
     }, [
         effectiveScope,
         cycleDivisor,
-        userProfile,
-        isFirstCycle,
-        payFrequency,
-        payDayOfWeek,
-        periodInfo,
-        budgets,
-        presupuestosFijos,
-        savingsTarget,
         amountPerPeriod,
         monthlyIncome,
+        presupuestosFijos,
+        totalSharedMonthly,
+        savingsTarget,
+        budgets,
     ]);
 
     // ─────────────────────────────────────────────────────────────
@@ -525,10 +572,11 @@ export default function GraficasScreen() {
         const div = isCycle ? cycleDivisor : 1;
 
         // A. Compromisos Fijos anclados SIEMPRE a escala mensual (Punto 1)
-        const compromisoPresupuestado = presupuestosFijos
-            .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+        const compromisoPresupuestado =
+            presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0) +
+            totalSharedMonthly;
 
-        const compromisoPagado = transactions
+        const compromisoPagadoDirecto = transactions
             .filter((t) => {
                 if (t.type !== 'expense') return false;
                 if (!t.isFixedExpense && t.category !== 'Gasto Fijo') return false;
@@ -538,6 +586,19 @@ export default function GraficasScreen() {
                 return ym === currentMonthYear;
             })
             .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+        const currentUid = auth.currentUser?.uid || '';
+        const sharedServicesPagados = sharedServices.reduce((acc, s) => {
+            const quota = Number(s.split?.[currentUid]) || 0;
+            if (quota <= 0) return acc;
+            const isHolder = s.holderUid === currentUid;
+            const isPaid = isHolder
+                ? s.status?.paidToProvider === true
+                : Array.isArray(s.status?.transferredBy) && s.status.transferredBy.includes(currentUid);
+            return acc + (isPaid ? quota : 0);
+        }, 0);
+
+        const compromisoPagado = compromisoPagadoDirecto + sharedServicesPagados;
 
         const compromisoPct = compromisoPresupuestado > 0
             ? Math.min(100, (compromisoPagado / compromisoPresupuestado) * 100)
@@ -663,6 +724,8 @@ export default function GraficasScreen() {
         scopedTransactions,
         ocioMaster,
         bufferMaster,
+        totalSharedMonthly,
+        sharedServices,
     ]);
 
     // Colores para las barras de progreso del Top de Categorías

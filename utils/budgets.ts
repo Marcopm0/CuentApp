@@ -1,6 +1,18 @@
 import { Budget } from '@/types/database';
 
 /**
+ * Normaliza nombres en IDs de Firestore (sin acentos, minúsculas, espacios a guion bajo)
+ */
+export function sanitizeBudgetId(categoryName: string): string {
+    return categoryName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '_')
+        .replace(/_+/g, '_');
+}
+
+/**
  * Deduplica el catálogo de presupuestos del usuario, priorizando plantillas maestras
  * permanentes (Opción B) sobre registros históricos legados asociados a un mes.
  */

@@ -1,15 +1,19 @@
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import {
+    addDoc,
     arrayRemove,
     arrayUnion,
     collection,
+    deleteDoc,
     doc,
     getDoc,
     getDocs,
     onSnapshot,
+    orderBy,
     query,
     serverTimestamp,
+    updateDoc,
     where,
     writeBatch,
 } from 'firebase/firestore';
@@ -19,6 +23,7 @@ import {
     Alert,
     Keyboard,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     ScrollView,
     StatusBar,
@@ -33,7 +38,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
-import { SharedFund, UserProfile } from '@/types/database';
+import { SharedFund, SharedService, UserProfile } from '@/types/database';
 
 /**
  * Genera un código de invitación aleatorio de 6 caracteres alfanuméricos en mayúsculas,
@@ -453,6 +458,317 @@ export default function CompartidosScreen() {
         }
     }, [sharedFund]);
 
+    // ─────────────────────────────────────────────────────────────
+    // FASE 2: GESTIÓN DE SERVICIOS RECURRENTES DEL HOGAR
+    // ─────────────────────────────────────────────────────────────
+    const currentUserUid = auth.currentUser?.uid || '';
+    const partnerUid = useMemo(() => {
+        if (!sharedFund || !currentUserUid) return '';
+        return sharedFund.members.find((m) => m !== currentUserUid) || '';
+    }, [sharedFund, currentUserUid]);
+
+    // Suscripción reactiva a la subcolección sharedFunds/{activeFundId}/services
+    const [services, setServices] = useState<SharedService[]>([]);
+    const [servicesLoading, setServicesLoading] = useState<boolean>(true);
+
+    useEffect(() => {
+        if (!activeFundId || !isLinkedWithPartner) {
+            setServices([]);
+            setServicesLoading(false);
+            return;
+        }
+
+        const servicesQuery = query(
+            collection(db, 'sharedFunds', activeFundId, 'services'),
+            orderBy('createdAt', 'desc')
+        );
+
+        const unsubscribeServices = onSnapshot(
+            servicesQuery,
+            (snapshot) => {
+                const items: SharedService[] = snapshot.docs.map((docSnap) => ({
+                    id: docSnap.id,
+                    ...(docSnap.data() as Omit<SharedService, 'id'>),
+                }));
+                setServices(items);
+                setServicesLoading(false);
+            },
+            (error) => {
+                console.error('Error al escuchar servicios compartidos:', error);
+                setServicesLoading(false);
+            }
+        );
+
+        return () => {
+            unsubscribeServices();
+        };
+    }, [activeFundId, isLinkedWithPartner]);
+
+    // Métricas del hogar
+    const totalHogarMonthly = useMemo(() => {
+        return services.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+    }, [services]);
+
+    const myTotalSharedMonthly = useMemo(() => {
+        return services.reduce((acc, s) => acc + (Number(s.split?.[currentUserUid]) || 0), 0);
+    }, [services, currentUserUid]);
+
+    // Estados del Modal de Agregar Servicio del Hogar
+    const [serviceModalVisible, setServiceModalVisible] = useState<boolean>(false);
+    const [serviceConcept, setServiceConcept] = useState<string>('');
+    const [serviceAmount, setServiceAmount] = useState<string>('');
+    const [serviceDueBlock, setServiceDueBlock] = useState<'1-10' | '11-20' | '21-end'>('1-10');
+    const [serviceHolderUid, setServiceHolderUid] = useState<string>('');
+    const [splitMode, setSplitMode] = useState<'50-50' | 'custom'>('50-50');
+    const [customSplitA, setCustomSplitA] = useState<string>('');
+    const [customSplitB, setCustomSplitB] = useState<string>('');
+    const [isSubmittingService, setIsSubmittingService] = useState<boolean>(false);
+
+    // Sanitizador numérico
+    const handleNumberInput = (text: string, setter: (val: string) => void) => {
+        const cleaned = text.replace(/[^0-9.]/g, '');
+        const parts = cleaned.split('.');
+        if (parts.length > 2) return;
+        if (parts[1] && parts[1].length > 2) {
+            setter(`${parts[0]}.${parts[1].slice(0, 2)}`);
+            return;
+        }
+        setter(cleaned);
+    };
+
+    const handleOpenAddServiceModal = () => {
+        setServiceConcept('');
+        setServiceAmount('');
+        setServiceDueBlock('1-10');
+        setServiceHolderUid(currentUserUid);
+        setSplitMode('50-50');
+        setCustomSplitA('');
+        setCustomSplitB('');
+        setServiceModalVisible(true);
+    };
+
+    const handleAmountChange = (val: string) => {
+        handleNumberInput(val, (cleaned) => {
+            setServiceAmount(cleaned);
+            const num = parseFloat(cleaned) || 0;
+            if (num > 0 && splitMode === '50-50') {
+                const half = Math.round((num / 2) * 100) / 100;
+                const rest = Math.round((num - half) * 100) / 100;
+                setCustomSplitA(half.toFixed(2));
+                setCustomSplitB(rest.toFixed(2));
+            }
+        });
+    };
+
+    const handleCustomSplitAChange = (val: string) => {
+        handleNumberInput(val, (cleaned) => {
+            setCustomSplitA(cleaned);
+            const total = parseFloat(serviceAmount) || 0;
+            const a = parseFloat(cleaned) || 0;
+            if (total > 0 && a <= total) {
+                const b = Math.round((total - a) * 100) / 100;
+                setCustomSplitB(b >= 0 ? (b % 1 === 0 ? b.toString() : b.toFixed(2)) : '0');
+            }
+        });
+    };
+
+    const handleCustomSplitBChange = (val: string) => {
+        handleNumberInput(val, (cleaned) => {
+            setCustomSplitB(cleaned);
+            const total = parseFloat(serviceAmount) || 0;
+            const b = parseFloat(cleaned) || 0;
+            if (total > 0 && b <= total) {
+                const a = Math.round((total - b) * 100) / 100;
+                setCustomSplitA(a >= 0 ? (a % 1 === 0 ? a.toString() : a.toFixed(2)) : '0');
+            }
+        });
+    };
+
+    const handleAddService = async () => {
+        const user = auth.currentUser;
+        if (!user || !activeFundId || !partnerUid) {
+            Alert.alert('Error', 'No se encontró un espacio compartido activo con tu pareja.');
+            return;
+        }
+
+        const cleanConcept = serviceConcept.trim();
+        if (!cleanConcept) {
+            Alert.alert('Concepto requerido', 'Por favor ingresa el nombre del servicio (ej. Internet, Renta, Gas, Luz).');
+            return;
+        }
+
+        const numericTotal = parseFloat(serviceAmount);
+        if (isNaN(numericTotal) || numericTotal <= 0) {
+            Alert.alert('Monto inválido', 'Por favor ingresa un monto total mensual mayor a $0.');
+            return;
+        }
+
+        let splitA = 0;
+        let splitB = 0;
+
+        if (splitMode === '50-50') {
+            splitA = Math.round((numericTotal / 2) * 100) / 100;
+            splitB = Math.round((numericTotal - splitA) * 100) / 100;
+        } else {
+            splitA = parseFloat(customSplitA) || 0;
+            splitB = parseFloat(customSplitB) || 0;
+            if (Math.abs((splitA + splitB) - numericTotal) > 0.05) {
+                Alert.alert(
+                    'Cuotas desiguales',
+                    `La suma de las cuotas ($${(splitA + splitB).toFixed(2)}) debe ser exactamente igual al monto mensual ($${numericTotal.toFixed(2)}).`
+                );
+                return;
+            }
+        }
+
+        setIsSubmittingService(true);
+        try {
+            const now = new Date();
+            const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+            await addDoc(collection(db, 'sharedFunds', activeFundId, 'services'), {
+                concept: cleanConcept,
+                totalAmount: numericTotal,
+                dueBlock: serviceDueBlock,
+                holderUid: serviceHolderUid || user.uid,
+                split: {
+                    [user.uid]: splitA,
+                    [partnerUid]: splitB,
+                },
+                status: {
+                    transferredBy: [],
+                    paidToProvider: false,
+                    lastPaidMonth: currentMonthStr,
+                },
+                createdAt: serverTimestamp(),
+            });
+
+            setServiceModalVisible(false);
+            Alert.alert('¡Servicio Registrado!', `"${cleanConcept}" se ha agregado con éxito a los gastos del hogar.`);
+        } catch (error) {
+            console.error('Error al registrar servicio del hogar:', error);
+            Alert.alert('Error', 'No se pudo registrar el servicio. Por favor intenta de nuevo.');
+        } finally {
+            setIsSubmittingService(false);
+        }
+    };
+
+    const handleMarkTransferred = async (service: SharedService) => {
+        const user = auth.currentUser;
+        if (!user || !activeFundId) return;
+
+        const now = new Date();
+        const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        try {
+            const serviceRef = doc(db, 'sharedFunds', activeFundId, 'services', service.id);
+            await updateDoc(serviceRef, {
+                'status.transferredBy': arrayUnion(user.uid),
+                'status.lastPaidMonth': currentMonthStr,
+            });
+        } catch (error) {
+            console.error('Error al marcar cuota transferida:', error);
+            Alert.alert('Error', 'No se pudo actualizar el estado de la transferencia.');
+        }
+    };
+
+    const handleMarkPaidToProvider = (service: SharedService) => {
+        const user = auth.currentUser;
+        if (!user || !activeFundId) return;
+
+        const now = new Date();
+        const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        Alert.alert(
+            'Confirmar liquidación',
+            `¿Confirmas que ya pagaste la factura oficial de "${service.concept}" ($${service.totalAmount.toFixed(2)} MXN) al proveedor?`,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Confirmar pago',
+                    onPress: async () => {
+                        try {
+                            const serviceRef = doc(db, 'sharedFunds', activeFundId, 'services', service.id);
+                            await updateDoc(serviceRef, {
+                                'status.paidToProvider': true,
+                                'status.lastPaidMonth': currentMonthStr,
+                            });
+                        } catch (error) {
+                            console.error('Error al marcar servicio como pagado:', error);
+                            Alert.alert('Error', 'No se pudo actualizar el estado.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const handleDeleteService = (service: SharedService) => {
+        if (!activeFundId) return;
+
+        Alert.alert(
+            '¿Eliminar servicio compartido?',
+            `¿Estás seguro de que deseas eliminar "${service.concept}"? Se quitará de la división del hogar y del disponible en Inicio de ambos.`,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Eliminar',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await deleteDoc(doc(db, 'sharedFunds', activeFundId, 'services', service.id));
+                        } catch (error) {
+                            console.error('Error al eliminar servicio compartido:', error);
+                            Alert.alert('Error', 'No se pudo eliminar el servicio.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const getDueBlockLabel = (block?: string) => {
+        switch (block) {
+            case '1-10':
+            case 'start':
+                return 'Días 1-10';
+            case '11-20':
+            case 'mid':
+                return 'Días 11-20';
+            case '21-end':
+            case 'end':
+                return 'Días 21-Fin';
+            default:
+                return 'Días 1-10';
+        }
+    };
+
+    const getServiceIcon = (concept: string): keyof typeof Ionicons.glyphMap => {
+        const lower = concept.toLowerCase();
+        if (lower.includes('internet') || lower.includes('wifi') || lower.includes('teléfono') || lower.includes('telefono')) {
+            return 'wifi-outline';
+        }
+        if (lower.includes('renta') || lower.includes('hipoteca') || lower.includes('casa') || lower.includes('depa')) {
+            return 'home-outline';
+        }
+        if (lower.includes('luz') || lower.includes('cfe') || lower.includes('electricidad')) {
+            return 'flash-outline';
+        }
+        if (lower.includes('agua')) {
+            return 'water-outline';
+        }
+        if (lower.includes('gas')) {
+            return 'flame-outline';
+        }
+        if (lower.includes('despensa') || lower.includes('super') || lower.includes('comida')) {
+            return 'cart-outline';
+        }
+        if (lower.includes('netflix') || lower.includes('spotify') || lower.includes('streaming') || lower.includes('tv')) {
+            return 'tv-outline';
+        }
+        return 'receipt-outline';
+    };
+
     // Pantalla de carga inicial
     if (loading) {
         return (
@@ -527,28 +843,253 @@ export default function CompartidosScreen() {
                                     <Text style={styles.sectionTitle}>Módulos Compartidos</Text>
                                 </View>
 
-                                {/* Placeholder: Servicios Recurrentes (Fase 2) */}
-                                <View style={styles.cardPlaceholder}>
-                                    <View style={styles.cardPlaceholderHeader}>
-                                        <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
-                                            <Ionicons name="receipt-outline" size={20} color={Theme.colors.borderFocus} />
-                                        </View>
-                                        <View style={styles.cardPlaceholderTitleGroup}>
-                                            <View style={styles.titleBadgeInline}>
-                                                <Text style={styles.cardPlaceholderTitle}>Servicios Recurrentes</Text>
-                                                <View style={styles.phaseBadge}>
-                                                    <Text style={styles.phaseBadgeText}>Próximamente</Text>
-                                                </View>
+                                {/* SECCIÓN FASE 2: MATRIZ DE SERVICIOS RECURRENTES DEL HOGAR */}
+                                <View style={styles.servicesSectionContainer}>
+                                    <View style={styles.servicesSectionHeaderRow}>
+                                        <View style={styles.servicesSectionHeaderLeft}>
+                                            <View style={[styles.iconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
+                                                <Ionicons name="receipt-outline" size={20} color={Theme.colors.borderFocus} />
                                             </View>
-                                            <Text style={styles.cardPlaceholderSubtitle}>
-                                                Renta, internet, luz, despensa y suscripciones divididas en equipo.
-                                            </Text>
+                                            <View>
+                                                <Text style={styles.servicesSectionTitle}>Servicios del Hogar</Text>
+                                                <Text style={styles.servicesSectionSubtitle}>
+                                                    {services.length} {services.length === 1 ? 'servicio registrado' : 'servicios registrados'}
+                                                </Text>
+                                            </View>
                                         </View>
+
+                                        <TouchableOpacity
+                                            style={styles.addServiceButton}
+                                            onPress={handleOpenAddServiceModal}
+                                            activeOpacity={0.8}
+                                        >
+                                            <Ionicons name="add" size={18} color={Theme.colors.background} />
+                                            <Text style={styles.addServiceButtonText}>Agregar</Text>
+                                        </TouchableOpacity>
                                     </View>
-                                    <View style={styles.previewDivider} />
-                                    <Text style={styles.cardPlaceholderFooter}>
-                                        ✨ Podrán programar quién paga cada servicio y sincronizar los recordatorios de vencimiento.
-                                    </Text>
+
+                                    {/* Barra de resumen de costos si hay servicios */}
+                                    {services.length > 0 && (
+                                        <View style={styles.servicesSummaryCard}>
+                                            <View style={styles.summaryItem}>
+                                                <Text style={styles.summaryItemLabel}>Total Hogar</Text>
+                                                <Text style={styles.summaryItemValue}>
+                                                    ${totalHogarMonthly.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                                <Text style={styles.summaryItemSub}>al mes</Text>
+                                            </View>
+                                            <View style={styles.summaryDivider} />
+                                            <View style={styles.summaryItem}>
+                                                <Text style={styles.summaryItemLabel}>Tu Aporte</Text>
+                                                <Text style={[styles.summaryItemValue, { color: Theme.colors.borderFocus }]}>
+                                                    ${myTotalSharedMonthly.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                                <Text style={styles.summaryItemSub}>al mes</Text>
+                                            </View>
+                                            <View style={styles.summaryDivider} />
+                                            <View style={styles.summaryItem}>
+                                                <Text style={styles.summaryItemLabel}>Aporte {partnerName}</Text>
+                                                <Text style={[styles.summaryItemValue, { color: Theme.colors.income }]}>
+                                                    ${(totalHogarMonthly - myTotalSharedMonthly).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                                <Text style={styles.summaryItemSub}>al mes</Text>
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    {/* Lista o Estado Vacío */}
+                                    {servicesLoading ? (
+                                        <View style={styles.servicesLoadingBox}>
+                                            <ActivityIndicator size="small" color={Theme.colors.borderFocus} />
+                                            <Text style={styles.servicesLoadingText}>Cargando servicios del hogar...</Text>
+                                        </View>
+                                    ) : services.length === 0 ? (
+                                        <View style={styles.servicesEmptyCard}>
+                                            <View style={styles.servicesEmptyIconCircle}>
+                                                <Ionicons name="receipt-outline" size={28} color={Theme.colors.textMuted} />
+                                            </View>
+                                            <Text style={styles.servicesEmptyTitle}>Sin servicios registrados aún</Text>
+                                            <Text style={styles.servicesEmptySub}>
+                                                Agreguen los recibos comunes (renta, internet, luz, despensa) para coordinar las cuotas y sincronizarlas con su disponible en Inicio.
+                                            </Text>
+                                            <TouchableOpacity
+                                                style={styles.emptyAddBtn}
+                                                onPress={handleOpenAddServiceModal}
+                                                activeOpacity={0.8}
+                                            >
+                                                <Ionicons name="add-circle-outline" size={18} color={Theme.colors.borderFocus} />
+                                                <Text style={styles.emptyAddBtnText}>Registrar primer servicio</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.servicesListContainer}>
+                                            {services.map((service) => {
+                                                const isCurrentUserHolder = service.holderUid === currentUserUid;
+                                                const myQuota = Number(service.split?.[currentUserUid]) || 0;
+                                                const partnerQuota = Number(service.split?.[partnerUid]) || 0;
+                                                const transferredList = Array.isArray(service.status?.transferredBy)
+                                                    ? service.status.transferredBy
+                                                    : [];
+                                                const hasMyTransferred = transferredList.includes(currentUserUid);
+                                                const hasPartnerTransferred = transferredList.includes(partnerUid);
+                                                const isPaidToProvider = service.status?.paidToProvider === true;
+                                                const iconName = getServiceIcon(service.concept);
+
+                                                return (
+                                                    <View key={service.id} style={styles.serviceCard}>
+                                                        {/* Fila Superior: Icono, Concepto, Bloque y Borrar */}
+                                                        <View style={styles.serviceCardHeader}>
+                                                            <View style={styles.serviceIconCircle}>
+                                                                <Ionicons name={iconName} size={20} color={Theme.colors.borderFocus} />
+                                                            </View>
+                                                            <View style={styles.serviceTitleGroup}>
+                                                                <Text style={styles.serviceConcept} numberOfLines={1}>
+                                                                    {service.concept}
+                                                                </Text>
+                                                                <View style={styles.serviceMetaRow}>
+                                                                    <View style={styles.dueBlockBadge}>
+                                                                        <Ionicons name="calendar-outline" size={12} color={Theme.colors.textSecondary} />
+                                                                        <Text style={styles.dueBlockBadgeText}>
+                                                                            {getDueBlockLabel(service.dueBlock)}
+                                                                        </Text>
+                                                                    </View>
+                                                                    <View style={styles.holderPill}>
+                                                                        <Ionicons
+                                                                            name={isCurrentUserHolder ? 'person' : 'person-outline'}
+                                                                            size={12}
+                                                                            color={isCurrentUserHolder ? Theme.colors.borderFocus : Theme.colors.textMuted}
+                                                                        />
+                                                                        <Text style={styles.holderPillText}>
+                                                                            Titular: {isCurrentUserHolder ? 'Tú' : partnerName}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+                                                            </View>
+
+                                                            <TouchableOpacity
+                                                                style={styles.deleteServiceBtn}
+                                                                onPress={() => handleDeleteService(service)}
+                                                                activeOpacity={0.7}
+                                                                accessibilityLabel="Eliminar servicio"
+                                                            >
+                                                                <Ionicons name="trash-outline" size={18} color={Theme.colors.textMuted} />
+                                                            </TouchableOpacity>
+                                                        </View>
+
+                                                        {/* Monto Total */}
+                                                        <View style={styles.serviceTotalRow}>
+                                                            <Text style={styles.serviceTotalLabel}>Recibo mensual:</Text>
+                                                            <Text style={styles.serviceTotalAmount}>
+                                                                ${service.totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                                                            </Text>
+                                                        </View>
+
+                                                        {/* Desglose de Cuotas */}
+                                                        <View style={styles.splitGrid}>
+                                                            <View style={[styles.splitBox, { borderColor: 'rgba(56, 189, 248, 0.25)' }]}>
+                                                                <Text style={styles.splitBoxLabel}>Tú aportas</Text>
+                                                                <Text style={[styles.splitBoxAmount, { color: Theme.colors.borderFocus }]}>
+                                                                    ${myQuota.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                                </Text>
+                                                            </View>
+
+                                                            <View style={[styles.splitBox, { borderColor: 'rgba(52, 211, 153, 0.25)' }]}>
+                                                                <Text style={styles.splitBoxLabel}>{partnerName} aporta</Text>
+                                                                <Text style={[styles.splitBoxAmount, { color: Theme.colors.income }]}>
+                                                                    ${partnerQuota.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                                </Text>
+                                                            </View>
+                                                        </View>
+
+                                                        <View style={styles.serviceCardDivider} />
+
+                                                        {/* Estatus y Acciones Semánticas */}
+                                                        <View style={styles.serviceActionsContainer}>
+                                                            {!isCurrentUserHolder ? (
+                                                                /* CASO 1: NO ERES EL TITULAR (Pagas tu parte a la pareja) */
+                                                                <View style={styles.actionColumn}>
+                                                                    {hasMyTransferred ? (
+                                                                        <View style={styles.transferredBadge}>
+                                                                            <Ionicons name="checkmark-circle" size={16} color={Theme.colors.income} />
+                                                                            <Text style={styles.transferredBadgeText}>Tu parte transferida</Text>
+                                                                        </View>
+                                                                    ) : (
+                                                                        <TouchableOpacity
+                                                                            style={styles.transferActionBtn}
+                                                                            onPress={() => handleMarkTransferred(service)}
+                                                                            activeOpacity={0.8}
+                                                                        >
+                                                                            <Ionicons name="paper-plane-outline" size={16} color={Theme.colors.background} />
+                                                                            <Text style={styles.transferActionBtnText}>
+                                                                                Ya transferí mi parte (${myQuota.toFixed(2)})
+                                                                            </Text>
+                                                                        </TouchableOpacity>
+                                                                    )}
+
+                                                                    {/* Indicador de pago oficial al proveedor */}
+                                                                    <View style={styles.providerStatusRow}>
+                                                                        <Ionicons
+                                                                            name={isPaidToProvider ? 'shield-checkmark' : 'time-outline'}
+                                                                            size={14}
+                                                                            color={isPaidToProvider ? Theme.colors.income : Theme.colors.textMuted}
+                                                                        />
+                                                                        <Text style={[styles.providerStatusText, isPaidToProvider && { color: Theme.colors.income }]}>
+                                                                            {isPaidToProvider
+                                                                                ? `${partnerName} ya liquidó la factura oficial al proveedor`
+                                                                                : `Pendiente que ${partnerName} liquide la factura al proveedor`}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+                                                            ) : (
+                                                                /* CASO 2: ERES EL TITULAR (Pagas la factura oficial) */
+                                                                <View style={styles.actionColumn}>
+                                                                    {/* Estatus de transferencia de la contraparte */}
+                                                                    <View style={styles.partnerStatusRow}>
+                                                                        <Ionicons
+                                                                            name={hasPartnerTransferred ? 'checkmark-circle-outline' : 'hourglass-outline'}
+                                                                            size={14}
+                                                                            color={hasPartnerTransferred ? Theme.colors.income : '#F59E0B'}
+                                                                        />
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.partnerStatusText,
+                                                                                hasPartnerTransferred && { color: Theme.colors.income },
+                                                                            ]}
+                                                                        >
+                                                                            {hasPartnerTransferred
+                                                                                ? `${partnerName} ya transfirió su parte (${partnerQuota.toFixed(2)} MXN)`
+                                                                                : `Pendiente que ${partnerName} transfiera (${partnerQuota.toFixed(2)} MXN)`}
+                                                                        </Text>
+                                                                    </View>
+
+                                                                    {/* Acción sobre el pago al proveedor */}
+                                                                    {isPaidToProvider ? (
+                                                                        <View style={styles.paidProviderBadge}>
+                                                                            <Ionicons name="shield-checkmark" size={16} color={Theme.colors.income} />
+                                                                            <Text style={styles.paidProviderBadgeText}>
+                                                                                Servicio liquidado este mes
+                                                                            </Text>
+                                                                        </View>
+                                                                    ) : (
+                                                                        <TouchableOpacity
+                                                                            style={styles.payProviderActionBtn}
+                                                                            onPress={() => handleMarkPaidToProvider(service)}
+                                                                            activeOpacity={0.8}
+                                                                        >
+                                                                            <Ionicons name="receipt" size={16} color={Theme.colors.background} />
+                                                                            <Text style={styles.payProviderActionBtnText}>
+                                                                                Marcar como pagado al proveedor
+                                                                            </Text>
+                                                                        </TouchableOpacity>
+                                                                    )}
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })}
+                                        </View>
+                                    )}
                                 </View>
 
                                 {/* Placeholder: Muro de Aportaciones (Fase 3) */}
@@ -748,6 +1289,277 @@ export default function CompartidosScreen() {
                     </ScrollView>
                 </TouchableWithoutFeedback>
             </KeyboardAvoidingView>
+
+            {/* MODAL PARA AGREGAR SERVICIO DEL HOGAR (FASE 2) */}
+            <Modal
+                visible={serviceModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setServiceModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
+                    <View style={styles.modalCard}>
+                        <View style={styles.modalHeader}>
+                            <View style={styles.modalHeaderTitleGroup}>
+                                <Text style={styles.modalTitle}>Nuevo Servicio del Hogar</Text>
+                                <Text style={styles.modalSubtitle}>Gasto recurrente dividido en equipo</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setServiceModalVisible(false)}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="close" size={20} color={Theme.colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                            contentContainerStyle={styles.modalScrollContent}
+                        >
+                            {/* 1. Concepto */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>Concepto o Servicio</Text>
+                                <TextInput
+                                    style={styles.modalTextInput}
+                                    placeholder="Ej. Internet Totalplay, Renta, Gas, Luz..."
+                                    placeholderTextColor={Theme.colors.textMuted}
+                                    value={serviceConcept}
+                                    onChangeText={setServiceConcept}
+                                    maxLength={50}
+                                />
+                            </View>
+
+                            {/* 2. Monto Mensual */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>Monto Total del Recibo Mensual</Text>
+                                <View style={styles.amountInputContainer}>
+                                    <Text style={styles.currencySymbol}>$</Text>
+                                    <TextInput
+                                        style={styles.amountInput}
+                                        placeholder="0.00"
+                                        placeholderTextColor={Theme.colors.textMuted}
+                                        keyboardType="numeric"
+                                        value={serviceAmount}
+                                        onChangeText={handleAmountChange}
+                                        maxLength={10}
+                                    />
+                                    <Text style={styles.currencyCode}>MXN</Text>
+                                </View>
+                            </View>
+
+                            {/* 3. Bloque de Vencimiento */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>Bloque de Vencimiento</Text>
+                                <View style={styles.dueBlockSelectorRow}>
+                                    {[
+                                        { label: '1 al 10', value: '1-10' as const },
+                                        { label: '11 al 20', value: '11-20' as const },
+                                        { label: '21 a fin de mes', value: '21-end' as const },
+                                    ].map((b) => (
+                                        <TouchableOpacity
+                                            key={b.value}
+                                            style={[
+                                                styles.dueBlockChip,
+                                                serviceDueBlock === b.value && styles.dueBlockChipActive,
+                                            ]}
+                                            onPress={() => setServiceDueBlock(b.value)}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.dueBlockChipText,
+                                                    serviceDueBlock === b.value && styles.dueBlockChipTextActive,
+                                                ]}
+                                            >
+                                                {b.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+
+                            {/* 4. Selector de Titular */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>¿Quién paga la factura oficial al proveedor?</Text>
+                                <View style={styles.holderSelectorRow}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.holderChip,
+                                            serviceHolderUid === currentUserUid && styles.holderChipActive,
+                                        ]}
+                                        onPress={() => setServiceHolderUid(currentUserUid)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons
+                                            name="person"
+                                            size={16}
+                                            color={serviceHolderUid === currentUserUid ? Theme.colors.borderFocus : Theme.colors.textMuted}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.holderChipText,
+                                                serviceHolderUid === currentUserUid && styles.holderChipTextActive,
+                                            ]}
+                                        >
+                                            Tú ({myName})
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.holderChip,
+                                            serviceHolderUid === partnerUid && styles.holderChipActive,
+                                        ]}
+                                        onPress={() => setServiceHolderUid(partnerUid)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons
+                                            name="person"
+                                            size={16}
+                                            color={serviceHolderUid === partnerUid ? Theme.colors.income : Theme.colors.textMuted}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.holderChipText,
+                                                serviceHolderUid === partnerUid && styles.holderChipTextActive,
+                                            ]}
+                                        >
+                                            {partnerName}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            {/* 5. División de Cuota */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>División de la Cuota Mensual</Text>
+                                <View style={styles.splitModeRow}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.splitModeChip,
+                                            splitMode === '50-50' && styles.splitModeChipActive,
+                                        ]}
+                                        onPress={() => {
+                                            setSplitMode('50-50');
+                                            const num = parseFloat(serviceAmount) || 0;
+                                            if (num > 0) {
+                                                const half = Math.round((num / 2) * 100) / 100;
+                                                setCustomSplitA(half.toFixed(2));
+                                                setCustomSplitB((num - half).toFixed(2));
+                                            }
+                                        }}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.splitModeChipText,
+                                                splitMode === '50-50' && styles.splitModeChipTextActive,
+                                            ]}
+                                        >
+                                            50% / 50% (Equitativo)
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.splitModeChip,
+                                            splitMode === 'custom' && styles.splitModeChipActive,
+                                        ]}
+                                        onPress={() => setSplitMode('custom')}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.splitModeChipText,
+                                                splitMode === 'custom' && styles.splitModeChipTextActive,
+                                            ]}
+                                        >
+                                            Personalizado
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {splitMode === '50-50' ? (
+                                    <View style={styles.splitPreviewRow}>
+                                        <View style={styles.splitPreviewPill}>
+                                            <Text style={styles.splitPreviewName}>Tú:</Text>
+                                            <Text style={styles.splitPreviewValue}>
+                                                ${(parseFloat(customSplitA) || (parseFloat(serviceAmount) || 0) / 2).toFixed(2)} MXN
+                                            </Text>
+                                        </View>
+                                        <View style={styles.splitPreviewPill}>
+                                            <Text style={styles.splitPreviewName}>{partnerName}:</Text>
+                                            <Text style={styles.splitPreviewValue}>
+                                                ${(parseFloat(customSplitB) || (parseFloat(serviceAmount) || 0) / 2).toFixed(2)} MXN
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <View style={styles.customSplitInputsRow}>
+                                        <View style={styles.customSplitInputCol}>
+                                            <Text style={styles.customSplitLabel}>Tu cuota</Text>
+                                            <View style={styles.amountInputContainerSmall}>
+                                                <Text style={styles.currencySymbolSmall}>$</Text>
+                                                <TextInput
+                                                    style={styles.amountInputSmall}
+                                                    placeholder="0.00"
+                                                    placeholderTextColor={Theme.colors.textMuted}
+                                                    keyboardType="numeric"
+                                                    value={customSplitA}
+                                                    onChangeText={handleCustomSplitAChange}
+                                                    maxLength={10}
+                                                />
+                                            </View>
+                                        </View>
+
+                                        <View style={styles.customSplitInputCol}>
+                                            <Text style={styles.customSplitLabel}>Cuota {partnerName}</Text>
+                                            <View style={styles.amountInputContainerSmall}>
+                                                <Text style={styles.currencySymbolSmall}>$</Text>
+                                                <TextInput
+                                                    style={styles.amountInputSmall}
+                                                    placeholder="0.00"
+                                                    placeholderTextColor={Theme.colors.textMuted}
+                                                    keyboardType="numeric"
+                                                    value={customSplitB}
+                                                    onChangeText={handleCustomSplitBChange}
+                                                    maxLength={10}
+                                                />
+                                            </View>
+                                        </View>
+                                    </View>
+                                )}
+                            </View>
+
+                            {/* Botón Guardar */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalSubmitButton,
+                                    (!serviceConcept.trim() || !(parseFloat(serviceAmount) > 0) || isSubmittingService) &&
+                                        styles.modalSubmitButtonDisabled,
+                                ]}
+                                onPress={handleAddService}
+                                activeOpacity={0.8}
+                                disabled={!serviceConcept.trim() || !(parseFloat(serviceAmount) > 0) || isSubmittingService}
+                            >
+                                {isSubmittingService ? (
+                                    <ActivityIndicator size="small" color={Theme.colors.background} />
+                                ) : (
+                                    <>
+                                        <Ionicons name="checkmark" size={18} color={Theme.colors.background} />
+                                        <Text style={styles.modalSubmitButtonText}>Guardar Servicio del Hogar</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -1167,5 +1979,588 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         color: Theme.colors.statusDanger,
+    },
+    // Estilos de la Fase 2: Servicios Recurrentes del Hogar
+    servicesSectionContainer: {
+        gap: 12,
+        marginTop: 6,
+    },
+    servicesSectionHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    servicesSectionHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    servicesSectionTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    servicesSectionSubtitle: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+    },
+    addServiceButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: Theme.colors.borderFocus,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: Theme.radius.full,
+    },
+    addServiceButtonText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.background,
+    },
+    servicesSummaryCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        borderRadius: Theme.radius.md,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+    },
+    summaryItem: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    summaryItemLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: Theme.colors.textMuted,
+        textTransform: 'uppercase',
+    },
+    summaryItemValue: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+        marginTop: 2,
+    },
+    summaryItemSub: {
+        fontSize: 9,
+        color: Theme.colors.textMuted,
+    },
+    summaryDivider: {
+        width: 1,
+        height: 24,
+        backgroundColor: Theme.colors.borderSubtle,
+    },
+    servicesLoadingBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        padding: 20,
+    },
+    servicesLoadingText: {
+        fontSize: 12,
+        color: Theme.colors.textMuted,
+    },
+    servicesEmptyCard: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        borderRadius: Theme.radius.lg,
+        gap: 10,
+    },
+    servicesEmptyIconCircle: {
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    servicesEmptyTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    servicesEmptySub: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+        textAlign: 'center',
+        lineHeight: 18,
+        maxWidth: 290,
+    },
+    emptyAddBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: Theme.radius.full,
+        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(56, 189, 248, 0.3)',
+        marginTop: 4,
+    },
+    emptyAddBtnText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.borderFocus,
+    },
+    servicesListContainer: {
+        gap: 12,
+    },
+    serviceCard: {
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        borderRadius: Theme.radius.lg,
+        padding: 16,
+        gap: 12,
+    },
+    serviceCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    serviceIconCircle: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    serviceTitleGroup: {
+        flex: 1,
+        gap: 4,
+    },
+    serviceConcept: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    serviceMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        flexWrap: 'wrap',
+    },
+    dueBlockBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: Theme.radius.xs,
+    },
+    dueBlockBadgeText: {
+        fontSize: 11,
+        color: Theme.colors.textSecondary,
+        fontWeight: '500',
+    },
+    holderPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: Theme.radius.xs,
+    },
+    holderPillText: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+    },
+    deleteServiceBtn: {
+        padding: 6,
+    },
+    serviceTotalRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    serviceTotalLabel: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+    },
+    serviceTotalAmount: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    splitGrid: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    splitBox: {
+        flex: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        borderWidth: 1,
+        borderRadius: Theme.radius.md,
+        padding: 10,
+        alignItems: 'center',
+    },
+    splitBoxLabel: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+        fontWeight: '500',
+    },
+    splitBoxAmount: {
+        fontSize: 14,
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    serviceCardDivider: {
+        height: 1,
+        backgroundColor: Theme.colors.borderSubtle,
+    },
+    serviceActionsContainer: {
+        gap: 8,
+    },
+    actionColumn: {
+        gap: 8,
+    },
+    transferredBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(52, 211, 153, 0.12)',
+        borderWidth: 1,
+        borderColor: 'rgba(52, 211, 153, 0.3)',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: Theme.radius.md,
+        justifyContent: 'center',
+    },
+    transferredBadgeText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.income,
+    },
+    transferActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: Theme.colors.borderFocus,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: Theme.radius.md,
+    },
+    transferActionBtnText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Theme.colors.background,
+    },
+    providerStatusRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        justifyContent: 'center',
+    },
+    providerStatusText: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+    },
+    partnerStatusRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        borderRadius: Theme.radius.sm,
+    },
+    partnerStatusText: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+    },
+    paidProviderBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: 'rgba(52, 211, 153, 0.12)',
+        borderWidth: 1,
+        borderColor: 'rgba(52, 211, 153, 0.3)',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: Theme.radius.md,
+        justifyContent: 'center',
+    },
+    paidProviderBadgeText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.income,
+    },
+    payProviderActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: Theme.colors.income,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: Theme.radius.md,
+    },
+    payProviderActionBtnText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Theme.colors.background,
+    },
+    // Estilos del Modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        justifyContent: 'flex-end',
+    },
+    modalCard: {
+        backgroundColor: '#121824',
+        borderTopLeftRadius: Theme.radius.xl,
+        borderTopRightRadius: Theme.radius.xl,
+        borderWidth: 1,
+        borderColor: Theme.colors.border,
+        maxHeight: '85%',
+        padding: 20,
+        gap: 16,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    modalHeaderTitleGroup: {
+        flex: 1,
+        gap: 2,
+    },
+    modalTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    modalSubtitle: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+    },
+    modalCloseButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalScrollContent: {
+        gap: 16,
+        paddingBottom: 24,
+    },
+    modalInputBlock: {
+        gap: 6,
+    },
+    modalInputLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Theme.colors.textSecondary,
+    },
+    modalTextInput: {
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        borderWidth: 1,
+        borderColor: Theme.colors.border,
+        borderRadius: Theme.radius.md,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        fontSize: 14,
+        color: Theme.colors.textPrimary,
+    },
+    dueBlockSelectorRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    dueBlockChip: {
+        flex: 1,
+        paddingVertical: 8,
+        paddingHorizontal: 6,
+        borderRadius: Theme.radius.md,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        alignItems: 'center',
+    },
+    dueBlockChipActive: {
+        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+        borderColor: Theme.colors.borderFocus,
+    },
+    dueBlockChipText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: Theme.colors.textSecondary,
+    },
+    dueBlockChipTextActive: {
+        color: Theme.colors.borderFocus,
+    },
+    holderSelectorRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    holderChip: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingVertical: 10,
+        borderRadius: Theme.radius.md,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    },
+    holderChipActive: {
+        backgroundColor: 'rgba(56, 189, 248, 0.12)',
+        borderColor: Theme.colors.borderFocus,
+    },
+    holderChipText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Theme.colors.textSecondary,
+    },
+    holderChipTextActive: {
+        color: Theme.colors.textPrimary,
+        fontWeight: '700',
+    },
+    splitModeRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    splitModeChip: {
+        flex: 1,
+        paddingVertical: 8,
+        borderRadius: Theme.radius.md,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        alignItems: 'center',
+    },
+    splitModeChipActive: {
+        backgroundColor: 'rgba(168, 85, 247, 0.15)',
+        borderColor: Theme.colors.savings,
+    },
+    splitModeChipText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: Theme.colors.textSecondary,
+    },
+    splitModeChipTextActive: {
+        color: Theme.colors.savings,
+        fontWeight: '700',
+    },
+    splitPreviewRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 4,
+    },
+    splitPreviewPill: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderRadius: Theme.radius.sm,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+    },
+    splitPreviewName: {
+        fontSize: 12,
+        color: Theme.colors.textMuted,
+    },
+    splitPreviewValue: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    customSplitInputsRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 4,
+    },
+    customSplitInputCol: {
+        flex: 1,
+        gap: 4,
+    },
+    customSplitLabel: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+    },
+    amountInputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        borderWidth: 1,
+        borderColor: Theme.colors.border,
+        borderRadius: Theme.radius.md,
+        paddingHorizontal: 14,
+    },
+    currencySymbol: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: Theme.colors.borderFocus,
+        marginRight: 6,
+    },
+    amountInput: {
+        flex: 1,
+        paddingVertical: 12,
+        fontSize: 16,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    currencyCode: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Theme.colors.textMuted,
+    },
+    amountInputContainerSmall: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        borderWidth: 1,
+        borderColor: Theme.colors.border,
+        borderRadius: Theme.radius.md,
+        paddingHorizontal: 10,
+    },
+    currencySymbolSmall: {
+        fontSize: 14,
+        color: Theme.colors.textSecondary,
+        marginRight: 4,
+    },
+    amountInputSmall: {
+        flex: 1,
+        paddingVertical: 8,
+        fontSize: 13,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    modalSubmitButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: Theme.colors.borderFocus,
+        paddingVertical: 14,
+        borderRadius: Theme.radius.md,
+        marginTop: 8,
+    },
+    modalSubmitButtonDisabled: {
+        opacity: 0.5,
+    },
+    modalSubmitButtonText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Theme.colors.background,
     },
 });

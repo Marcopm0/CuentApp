@@ -1,7 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
 import { Theme } from '@/constants/theme';
 import { auth, db } from '@/services/firebase';
-import { Budget, Transaction } from '@/types/database';
+import { Budget, SharedService, Transaction } from '@/types/database';
 import { deduplicateBudgets } from '@/utils/budgets';
 import { getLocalDateString, getTransactionDate } from '@/utils/dates';
 import { DueBlock, getNextCycleBlocks, getPeriodInfo, PayFrequency } from '@/utils/periods';
@@ -26,8 +26,11 @@ export default function HomeScreen() {
     hasPreSavedNextCycle?: boolean;
     firstPeriodKey?: string;
     createdAt?: any;
+    activeSharedFundId?: string | null;
   }>({ hasPreSavedNextCycle: true });
   const [subFixedExpenses, setSubFixedExpenses] = useState<Budget[]>([]);
+  const [subFixedExpensesLoaded, setSubFixedExpensesLoaded] = useState<boolean>(false);
+  const [sharedServices, setSharedServices] = useState<SharedService[]>([]);
 
   //Para el registro de gastos
   const ultimosMovimientos = useMemo(() => {
@@ -91,11 +94,12 @@ export default function HomeScreen() {
 
           setAmountPerPeriod(periodAmount);
 
-          // Estado del perfil para cálculo de apartado de próximo ciclo
+          // Estado del perfil para cálculo de apartado de próximo ciclo y fondos compartidos
           setUserProfile({
             hasPreSavedNextCycle: data.hasPreSavedNextCycle !== undefined ? data.hasPreSavedNextCycle : true,
             firstPeriodKey: data.firstPeriodKey,
             createdAt: data.createdAt,
+            activeSharedFundId: data.activeSharedFundId || null,
           });
         }
       },
@@ -145,6 +149,7 @@ export default function HomeScreen() {
           };
         });
         setSubFixedExpenses(items);
+        setSubFixedExpensesLoaded(true);
       },
       (error) => {
         console.error('Error al escuchar fixedExpenses en index.tsx:', error);
@@ -172,6 +177,33 @@ export default function HomeScreen() {
       unsubscribeTx();
     };
   }, [currentMonthYear]);
+
+  // 3.2 Suscripción reactiva en tiempo real a los servicios compartidos del hogar (Fase 2)
+  useEffect(() => {
+    if (!userProfile.activeSharedFundId) {
+      setSharedServices([]);
+      return;
+    }
+
+    const servicesRef = collection(db, 'sharedFunds', userProfile.activeSharedFundId, 'services');
+    const unsubscribeSharedServices = onSnapshot(
+      servicesRef,
+      (snapshot) => {
+        const items: SharedService[] = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<SharedService, 'id'>),
+        }));
+        setSharedServices(items);
+      },
+      (error) => {
+        console.error('Error al escuchar servicios compartidos en index.tsx:', error);
+      }
+    );
+
+    return () => {
+      unsubscribeSharedServices();
+    };
+  }, [userProfile.activeSharedFundId]);
 
   // ─────────────────────────────────────────────────────────────
   // DETERMINAR PERIODO ACTIVO (Quincenas, Mes, Semanas reales móviles)
@@ -201,14 +233,16 @@ export default function HomeScreen() {
   }, [userProfile, periodInfo]);
 
   // ─────────────────────────────────────────────────────────────
-  // COMPROMISOS Y GASTOS FIJOS (SUBCOLECCIÓN REACTIVA + RETROCOMPATIBILIDAD)
+  // COMPROMISOS Y GASTOS FIJOS (SUBCOLECCIÓN REACTIVA CANÓNICA)
   // ─────────────────────────────────────────────────────────────
   const presupuestosFijos = useMemo(() => {
-    if (subFixedExpenses.length > 0) {
+    // Si la subcolección reactiva ya emitió su snapshot, es la fuente de verdad canónica
+    if (subFixedExpensesLoaded) {
       return subFixedExpenses;
     }
+    // Fallback inicial mientras carga la suscripción en tiempo real
     return budgets.filter((b) => b.isFixedExpense);
-  }, [subFixedExpenses, budgets]);
+  }, [subFixedExpenses, subFixedExpensesLoaded, budgets]);
 
   // ─────────────────────────────────────────────────────────────
   // CÁLCULO DEL DISPONIBLE POR PERIODO Y FLUJO DE EFECTIVO REAL
@@ -232,19 +266,28 @@ export default function HomeScreen() {
     // 1. Divisor proporcional para apartados mensuales según periodicidad
     const divisor = payFrequency === 'weekly' ? 4 : payFrequency === 'biweekly' ? 2 : 1;
 
-    // 2. Gastos fijos del periodo
+    // 2. Gastos fijos del periodo (individuales + cuota proporcional del hogar compartido)
+    const currentUid = auth.currentUser?.uid || '';
+    const totalSharedMonthly = sharedServices.reduce((acc, s) => {
+      const quota = Number(s.split?.[currentUid]) || 0;
+      return acc + quota;
+    }, 0);
+    const sharedFijosDelPeriodo = totalSharedMonthly / divisor;
+
     let fijosDelPeriodo = 0;
     if (userProfile.hasPreSavedNextCycle === false && isFirstCycle) {
       // Retener del ingreso de este ciclo los gastos que vencen en el ciclo entrante más los del ciclo activo
       const nextCycleBlocks = getNextCycleBlocks(payFrequency, payDayOfWeek);
       const relevantBlocks = new Set([...periodInfo.activeBlocks, ...nextCycleBlocks]);
-      fijosDelPeriodo = presupuestosFijos
+      const individualFijos = presupuestosFijos
         .filter((b) => b.isFixedExpense && b.dueBlock && relevantBlocks.has(b.dueBlock))
         .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+      fijosDelPeriodo = individualFijos + sharedFijosDelPeriodo;
     } else {
       // En ciclo normal o si hasPreSavedNextCycle === true: Aplicar el prorrateo parejo estándar
-      const totalFijosMensuales = presupuestosFijos
+      const totalFijosIndividuales = presupuestosFijos
         .reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
+      const totalFijosMensuales = totalFijosIndividuales + totalSharedMonthly;
 
       fijosDelPeriodo = totalFijosMensuales / divisor; // divisor: weekly=4, biweekly=2, monthly=1
     }
@@ -412,14 +455,21 @@ export default function HomeScreen() {
       progressPercentage: progress,
       mensajePie: pie,
     };
-  }, [budgets, transactions, payFrequency, payDayOfWeek, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear, userProfile, isFirstCycle, presupuestosFijos]);
+  }, [budgets, transactions, payFrequency, payDayOfWeek, savingsTarget, amountPerPeriod, periodInfo, currentMonthYear, userProfile, isFirstCycle, presupuestosFijos, sharedServices]);
 
   // ─────────────────────────────────────────────────────────────
   // COMPROMISOS Y GASTOS FIJOS (TARJETA DE SEGUIMIENTO MENSUAL - OPCIÓN B)
   // ─────────────────────────────────────────────────────────────
   const totalFijosMes = useMemo(() => {
-    return presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0);
-  }, [presupuestosFijos]);
+    const currentUid = auth.currentUser?.uid || '';
+    const totalSharedMonthly = sharedServices.reduce((acc, s) => {
+      return acc + (Number(s.split?.[currentUid]) || 0);
+    }, 0);
+    return (
+      presupuestosFijos.reduce((acc, b) => acc + (Number(b.limitAmount) || 0), 0) +
+      totalSharedMonthly
+    );
+  }, [presupuestosFijos, sharedServices]);
 
   // Transacciones del mes en curso (obtenido del reloj local)
   const monthlyTransactions = useMemo(() => {
@@ -433,7 +483,7 @@ export default function HomeScreen() {
     });
   }, [transactions, currentMonthYear]);
 
-  // Cálculo reactivo y dinámico de fijos pagados y saldo restante
+  // Cálculo reactivo y dinámico de fijos pagados y saldo restante (personales)
   const fixedExpensesStatus = useMemo(() => {
     return presupuestosFijos.map((budget) => {
       const spentThisMonth = monthlyTransactions
@@ -454,13 +504,50 @@ export default function HomeScreen() {
         spentThisMonth,
         isPaid,
         remainingBalance,
+        isSharedService: false,
+        isHolder: false,
       };
     });
   }, [presupuestosFijos, monthlyTransactions]);
 
+  // Lista consolidada de compromisos fijos: personales + servicios del hogar (Fase 2)
+  const allFixedExpensesStatus = useMemo(() => {
+    const currentUid = auth.currentUser?.uid || '';
+
+    const sharedItems = sharedServices
+      .filter((s) => (Number(s.split?.[currentUid]) || 0) > 0)
+      .map((s) => {
+        const myQuota = Number(s.split[currentUid]) || 0;
+        const isHolder = s.holderUid === currentUid;
+        const isPaid = isHolder
+          ? s.status?.paidToProvider === true
+          : Array.isArray(s.status?.transferredBy) && s.status.transferredBy.includes(currentUid);
+
+        let dueBlock: DueBlock = 'mid';
+        if (s.dueBlock === '1-10') dueBlock = 'start';
+        else if (s.dueBlock === '21-end') dueBlock = 'end';
+
+        return {
+          id: `shared_${s.id}`,
+          category: `${s.concept} (Hogar)`,
+          name: `${s.concept} (Hogar)`,
+          limitAmount: myQuota,
+          spentThisMonth: isPaid ? myQuota : 0,
+          isPaid,
+          remainingBalance: isPaid ? 0 : myQuota,
+          dueBlock,
+          isFixedExpense: true,
+          isSharedService: true,
+          isHolder,
+        };
+      });
+
+    return [...fixedExpensesStatus, ...sharedItems];
+  }, [fixedExpensesStatus, sharedServices]);
+
   const totalPagado = useMemo(() => {
-    return fixedExpensesStatus.reduce((acc, b) => acc + b.spentThisMonth, 0);
-  }, [fixedExpensesStatus]);
+    return allFixedExpensesStatus.reduce((acc, b) => acc + b.spentThisMonth, 0);
+  }, [allFixedExpensesStatus]);
 
   const progresoFijos = useMemo(() => {
     if (totalFijosMes <= 0) return 0;
@@ -892,13 +979,13 @@ export default function HomeScreen() {
           </View>
 
           {/* Lista de elementos fijos */}
-          {presupuestosFijos.length === 0 ? (
+          {allFixedExpensesStatus.length === 0 ? (
             <ThemedText style={styles.emptyStateText}>
               No hay compromisos fijos registrados este mes.
             </ThemedText>
           ) : (
             <View style={styles.fixedListContainer}>
-              {fixedExpensesStatus.map((b) => {
+              {allFixedExpensesStatus.map((b) => {
                 const pagado = b.isPaid;
                 return (
                   <View key={b.id} style={styles.fixedItemRow}>
@@ -927,7 +1014,9 @@ export default function HomeScreen() {
                             pagado ? styles.fixedStatusPaidText : styles.fixedStatusPendingText,
                           ]}
                         >
-                          {pagado ? '✅ Pagado' : '⏳ Pendiente'}
+                          {pagado
+                            ? (b.isSharedService && !b.isHolder ? '✅ Transferido' : '✅ Pagado')
+                            : '⏳ Pendiente'}
                         </ThemedText>
                       </View>
                     </View>

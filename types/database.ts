@@ -36,6 +36,23 @@ export interface SharedFund {
     maxMembers: number;
 }
 
+export interface SharedService {
+    id: string;
+    concept: string;               // Ej: "Internet Totalplay", "Renta", "Gas"
+    totalAmount: number;           // Monto total del recibo mensual
+    dueBlock: '1-10' | '11-20' | '21-end';
+    holderUid: string;             // UID del miembro responsable de pagar la factura oficial
+    split: {
+        [uid: string]: number;       // Cuota exacta que aporta cada uno (por defecto 50/50)
+    };
+    status: {
+        transferredBy: string[];     // UIDs de quienes ya transfirieron su cuota a la contraparte
+        paidToProvider: boolean;     // true si el titular ya liquidó el recibo completo al proveedor
+        lastPaidMonth?: string;      // Formato 'YYYY-MM' para control de ciclo
+    };
+    createdAt: any;
+}
+
 export interface Transaction {
     id?: string;
     userId: string;
