@@ -1,4 +1,4 @@
-import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import {
     addDoc,
@@ -7,17 +7,15 @@ import {
     collection,
     deleteDoc,
     doc,
-    getDoc,
     getDocs,
     onSnapshot,
     orderBy,
     query,
     serverTimestamp,
-    updateDoc,
     where,
-    writeBatch,
+    writeBatch
 } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -28,6 +26,7 @@ import {
     ScrollView,
     StatusBar,
     StyleSheet,
+    Switch,
     Text,
     TextInput,
     TouchableOpacity,
@@ -37,8 +36,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Theme } from '@/constants/theme';
+import {
+    addSharedExpense,
+    deleteSharedExpense,
+    settleSharedExpenses,
+    toggleServicePaidToProvider,
+    toggleServiceTransferred
+} from '@/services/database';
 import { auth, db } from '@/services/firebase';
-import { SharedFund, SharedService, UserProfile } from '@/types/database';
+import { SharedExpense, SharedFund, SharedService, UserProfile } from '@/types/database';
 
 /**
  * Genera un código de invitación aleatorio de 6 caracteres alfanuméricos en mayúsculas,
@@ -653,54 +659,82 @@ export default function CompartidosScreen() {
         }
     };
 
-    const handleMarkTransferred = async (service: SharedService) => {
+    const handleToggleTransferred = (service: SharedService, isCurrentlyTransferred: boolean) => {
         const user = auth.currentUser;
         if (!user || !activeFundId) return;
 
-        const now = new Date();
-        const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-        try {
-            const serviceRef = doc(db, 'sharedFunds', activeFundId, 'services', service.id);
-            await updateDoc(serviceRef, {
-                'status.transferredBy': arrayUnion(user.uid),
-                'status.lastPaidMonth': currentMonthStr,
+        if (isCurrentlyTransferred) {
+            Alert.alert(
+                '¿Desmarcar transferencia?',
+                `¿Deseas desmarcar tu cuota de "${service.concept}"? Volverá a aparecer como pendiente en tu pantalla de Inicio y se restará del total pagado.`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Sí, desmarcar',
+                        style: 'destructive',
+                        onPress: async () => {
+                            try {
+                                await toggleServiceTransferred(activeFundId, service.id, user.uid, true);
+                            } catch (error) {
+                                console.error('Error al desmarcar cuota transferida:', error);
+                                Alert.alert('Error', 'No se pudo actualizar el estado de la transferencia.');
+                            }
+                        },
+                    },
+                ]
+            );
+        } else {
+            toggleServiceTransferred(activeFundId, service.id, user.uid, false).catch((error) => {
+                console.error('Error al marcar cuota transferida:', error);
+                Alert.alert('Error', 'No se pudo actualizar el estado de la transferencia.');
             });
-        } catch (error) {
-            console.error('Error al marcar cuota transferida:', error);
-            Alert.alert('Error', 'No se pudo actualizar el estado de la transferencia.');
         }
     };
 
-    const handleMarkPaidToProvider = (service: SharedService) => {
+    const handleTogglePaidToProvider = (service: SharedService, isCurrentlyPaid: boolean) => {
         const user = auth.currentUser;
         if (!user || !activeFundId) return;
 
-        const now = new Date();
-        const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-        Alert.alert(
-            'Confirmar liquidación',
-            `¿Confirmas que ya pagaste la factura oficial de "${service.concept}" ($${service.totalAmount.toFixed(2)} MXN) al proveedor?`,
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                    text: 'Confirmar pago',
-                    onPress: async () => {
-                        try {
-                            const serviceRef = doc(db, 'sharedFunds', activeFundId, 'services', service.id);
-                            await updateDoc(serviceRef, {
-                                'status.paidToProvider': true,
-                                'status.lastPaidMonth': currentMonthStr,
-                            });
-                        } catch (error) {
-                            console.error('Error al marcar servicio como pagado:', error);
-                            Alert.alert('Error', 'No se pudo actualizar el estado.');
-                        }
+        if (isCurrentlyPaid) {
+            Alert.alert(
+                '¿Desmarcar pago al proveedor?',
+                `¿Deseas desmarcar "${service.concept}" como pagado al proveedor? Volverá a aparecer como pendiente en tu pantalla de Inicio y en el espacio compartido.`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Sí, desmarcar',
+                        style: 'destructive',
+                        onPress: async () => {
+                            try {
+                                await toggleServicePaidToProvider(activeFundId, service.id, true);
+                            } catch (error) {
+                                console.error('Error al desmarcar pago al proveedor:', error);
+                                Alert.alert('Error', 'No se pudo actualizar el estado del servicio.');
+                            }
+                        },
                     },
-                },
-            ]
-        );
+                ]
+            );
+        } else {
+            Alert.alert(
+                'Confirmar liquidación',
+                `¿Confirmas que ya pagaste la factura oficial de "${service.concept}" ($${service.totalAmount.toFixed(2)} MXN) al proveedor?`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Confirmar pago',
+                        onPress: async () => {
+                            try {
+                                await toggleServicePaidToProvider(activeFundId, service.id, false);
+                            } catch (error) {
+                                console.error('Error al marcar servicio como pagado:', error);
+                                Alert.alert('Error', 'No se pudo actualizar el estado.');
+                            }
+                        },
+                    },
+                ]
+            );
+        }
     };
 
     const handleDeleteService = (service: SharedService) => {
@@ -765,6 +799,407 @@ export default function CompartidosScreen() {
         }
         if (lower.includes('netflix') || lower.includes('spotify') || lower.includes('streaming') || lower.includes('tv')) {
             return 'tv-outline';
+        }
+        return 'receipt-outline';
+    };
+
+    // ─────────────────────────────────────────────────────────────
+    // FASE 3: MURO DE APORTACIONES LIBRES Y BALANCE DEL CICLO
+    // ─────────────────────────────────────────────────────────────
+    const [expenses, setExpenses] = useState<SharedExpense[]>([]);
+    const [expensesLoading, setExpensesLoading] = useState<boolean>(true);
+    const [expenseFilter, setExpenseFilter] = useState<'unsettled' | 'all'>('unsettled');
+    const [isSettling, setIsSettling] = useState<boolean>(false);
+
+    // Estados del Modal de Agregar Aportación Libre
+    const [expenseModalVisible, setExpenseModalVisible] = useState<boolean>(false);
+    const [expenseConcept, setExpenseConcept] = useState<string>('');
+    const [expenseAmount, setExpenseAmount] = useState<string>('');
+    const [expensePaidBy, setExpensePaidBy] = useState<string>('');
+    const [expenseSplitMode, setExpenseSplitMode] = useState<'50-50' | 'custom'>('50-50');
+    const [expenseSplitMe, setExpenseSplitMe] = useState<string>('');
+    const [expenseSplitPartner, setExpenseSplitPartner] = useState<string>('');
+    const [fullTicketDebit, setFullTicketDebit] = useState<boolean>(false);
+    const [isSubmittingExpense, setIsSubmittingExpense] = useState<boolean>(false);
+
+    // Suscripción reactiva en tiempo real a subcolección sharedFunds/{activeFundId}/expenses
+    useEffect(() => {
+        if (!activeFundId || !isLinkedWithPartner) {
+            setExpenses([]);
+            setExpensesLoading(false);
+            return;
+        }
+
+        const expensesCollectionRef = collection(db, 'sharedFunds', activeFundId, 'expenses');
+        const unsubscribeExpenses = onSnapshot(
+            expensesCollectionRef,
+            (snapshot) => {
+                const items: SharedExpense[] = snapshot.docs.map((docSnap) => ({
+                    id: docSnap.id,
+                    ...(docSnap.data() as Omit<SharedExpense, 'id'>),
+                }));
+                // Ordenar por fecha descendente, luego createdAt
+                items.sort((a, b) => {
+                    if (a.date && b.date && a.date !== b.date) {
+                        return b.date.localeCompare(a.date);
+                    }
+                    const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0);
+                    const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0);
+                    return tB - tA;
+                });
+                setExpenses(items);
+                setExpensesLoading(false);
+            },
+            (error) => {
+                console.error('Error al escuchar aportaciones compartidas:', error);
+                setExpensesLoading(false);
+            }
+        );
+
+        return () => {
+            unsubscribeExpenses();
+        };
+    }, [activeFundId, isLinkedWithPartner]);
+
+    // Cálculo Contable Simétrico del Balance del Ciclo
+    const balanceData = useMemo(() => {
+        const unsettled = expenses.filter((e) => !e.settled);
+        const settled = expenses.filter((e) => e.settled);
+        const totalSpent = unsettled.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+
+        let paidByMe = 0;
+        let myShare = 0;
+        let paidByPartner = 0;
+        let partnerShare = 0;
+
+        unsettled.forEach((e) => {
+            const amount = Number(e.amount) || 0;
+            if (e.paidBy === currentUserUid) {
+                paidByMe += amount;
+            } else {
+                paidByPartner += amount;
+            }
+
+            const splitMe = e.split?.[currentUserUid] !== undefined
+                ? Number(e.split[currentUserUid])
+                : Math.round((amount / 2) * 100) / 100;
+            const splitPartner = e.split?.[partnerUid] !== undefined
+                ? Number(e.split[partnerUid])
+                : Math.round((amount - splitMe) * 100) / 100;
+
+            myShare += splitMe;
+            partnerShare += splitPartner;
+        });
+
+        // Saldo neto individual: lo pagado por el usuario menos su cuota asignada
+        const rawNet = paidByMe - myShare;
+        const netBalance = Math.round(rawNet * 100) / 100;
+
+        return {
+            unsettled,
+            settled,
+            totalSpent,
+            paidByMe,
+            myShare,
+            paidByPartner,
+            partnerShare,
+            netBalance,
+        };
+    }, [expenses, currentUserUid, partnerUid]);
+
+    // Handlers para Registro de Aportación
+    const handleOpenAddExpenseModal = () => {
+        setExpenseConcept('');
+        setExpenseAmount('');
+        setExpensePaidBy(currentUserUid);
+        setExpenseSplitMode('50-50');
+        setExpenseSplitMe('');
+        setExpenseSplitPartner('');
+        setFullTicketDebit(false);
+        setExpenseModalVisible(true);
+    };
+
+    const handleExpenseAmountChange = (val: string) => {
+        handleNumberInput(val, (cleaned) => {
+            setExpenseAmount(cleaned);
+            const num = parseFloat(cleaned) || 0;
+            if (num > 0 && expenseSplitMode === '50-50') {
+                const half = Math.round((num / 2) * 100) / 100;
+                const rest = Math.round((num - half) * 100) / 100;
+                setExpenseSplitMe(half.toFixed(2));
+                setExpenseSplitPartner(rest.toFixed(2));
+            }
+        });
+    };
+
+    const handleExpenseSplitMeChange = (val: string) => {
+        handleNumberInput(val, (cleaned) => {
+            setExpenseSplitMe(cleaned);
+            const total = parseFloat(expenseAmount) || 0;
+            const me = parseFloat(cleaned) || 0;
+            if (total > 0 && me <= total) {
+                const partnerVal = Math.round((total - me) * 100) / 100;
+                setExpenseSplitPartner(partnerVal >= 0 ? (partnerVal % 1 === 0 ? partnerVal.toString() : partnerVal.toFixed(2)) : '0');
+            }
+        });
+    };
+
+    const handleExpenseSplitPartnerChange = (val: string) => {
+        handleNumberInput(val, (cleaned) => {
+            setExpenseSplitPartner(cleaned);
+            const total = parseFloat(expenseAmount) || 0;
+            const partnerVal = parseFloat(cleaned) || 0;
+            if (total > 0 && partnerVal <= total) {
+                const me = Math.round((total - partnerVal) * 100) / 100;
+                setExpenseSplitMe(me >= 0 ? (me % 1 === 0 ? me.toString() : me.toFixed(2)) : '0');
+            }
+        });
+    };
+
+    const handleAddExpense = async () => {
+        const user = auth.currentUser;
+        if (!user || !activeFundId || !partnerUid) {
+            Alert.alert('Error', 'No se encontró un espacio compartido activo con tu pareja.');
+            return;
+        }
+
+        const cleanConcept = expenseConcept.trim();
+        if (!cleanConcept) {
+            Alert.alert('Concepto requerido', 'Por favor ingresa la descripción de la compra (ej. Despensa Chedraui, Gasolina, Farmacia).');
+            return;
+        }
+
+        const numericAmount = parseFloat(expenseAmount);
+        if (isNaN(numericAmount) || numericAmount <= 0) {
+            Alert.alert('Monto inválido', 'Por favor ingresa un monto total mayor a $0.');
+            return;
+        }
+
+        let splitMe = 0;
+        let splitPartner = 0;
+
+        if (expenseSplitMode === '50-50') {
+            splitMe = Math.round((numericAmount / 2) * 100) / 100;
+            splitPartner = Math.round((numericAmount - splitMe) * 100) / 100;
+        } else {
+            splitMe = parseFloat(expenseSplitMe) || 0;
+            splitPartner = parseFloat(expenseSplitPartner) || 0;
+            if (Math.abs((splitMe + splitPartner) - numericAmount) > 0.05) {
+                Alert.alert(
+                    'División desigual',
+                    `La suma de las cuotas ($${(splitMe + splitPartner).toFixed(2)}) debe coincidir exactamente con el monto total ($${numericAmount.toFixed(2)}).`
+                );
+                return;
+            }
+        }
+
+        setIsSubmittingExpense(true);
+        try {
+            const now = new Date();
+            const dateStr = now.toISOString().split('T')[0];
+            const paidBy = expensePaidBy || user.uid;
+            const paidByName = paidBy === user.uid ? myName : partnerName;
+
+            // Configurar transacción personal para impactar Disponible en Inicio si pagó el usuario
+            let personalTxPayload = undefined;
+            if (paidBy === user.uid) {
+                const amountToRecord = fullTicketDebit ? numericAmount : splitMe;
+                if (amountToRecord > 0) {
+                    personalTxPayload = {
+                        userId: user.uid,
+                        amount: amountToRecord,
+                        description: `${cleanConcept} (Aporte Hogar)`,
+                        category: '🏠 Hogar Compartido',
+                        targetBucket: 'leisure' as const,
+                    };
+                }
+            }
+
+            await addSharedExpense(
+                activeFundId,
+                {
+                    concept: cleanConcept,
+                    amount: numericAmount,
+                    paidBy,
+                    paidByName,
+                    date: dateStr,
+                    split: {
+                        [user.uid]: splitMe,
+                        [partnerUid]: splitPartner,
+                    },
+                    settled: false,
+                },
+                personalTxPayload
+            );
+
+            setExpenseModalVisible(false);
+            Alert.alert(
+                '¡Aportación Registrada!',
+                personalTxPayload
+                    ? fullTicketDebit
+                        ? `"${cleanConcept}" registrada por $${numericAmount.toFixed(2)} MXN (ticket completo descontado de tu Disponible).`
+                        : `"${cleanConcept}" registrada por $${numericAmount.toFixed(2)} MXN (tu cuota de $${splitMe.toFixed(2)} descontada de tu Disponible).`
+                    : `"${cleanConcept}" registrada con éxito por $${numericAmount.toFixed(2)} MXN.`
+            );
+        } catch (error) {
+            console.error('Error al registrar aportación compartida:', error);
+            Alert.alert('Error', 'No se pudo registrar la aportación. Por favor intenta de nuevo.');
+        } finally {
+            setIsSubmittingExpense(false);
+        }
+    };
+
+    const handleSettleExpenses = () => {
+        if (!activeFundId || balanceData.unsettled.length === 0) return;
+
+        const { netBalance, unsettled } = balanceData;
+        const absBalance = Math.abs(netBalance);
+
+        let debtorUid = '';
+        let debtorName = '';
+        let creditorUid = '';
+        let creditorName = '';
+
+        if (netBalance > 0.009) {
+            // Saldo a favor del usuario actual: la pareja le debe pagar
+            debtorUid = partnerUid;
+            debtorName = partnerName;
+            creditorUid = currentUserUid;
+            creditorName = myName;
+        } else if (netBalance < -0.009) {
+            // Saldo deudor del usuario actual: debe pagar a la pareja
+            debtorUid = currentUserUid;
+            debtorName = myName;
+            creditorUid = partnerUid;
+            creditorName = partnerName;
+        }
+
+        const settlementDetails = absBalance > 0.009 ? {
+            debtorUid,
+            debtorName,
+            creditorUid,
+            creditorName,
+            amount: absBalance,
+        } : undefined;
+
+        const confirmMsg = absBalance > 0.009
+            ? netBalance < -0.009
+                ? `Debes $${absBalance.toFixed(2)} MXN a ${partnerName}. Al liquidar, se marcarán las compras como saldadas y se registrará un gasto en tu Disponible de Inicio.`
+                : `${partnerName} te debe $${absBalance.toFixed(2)} MXN. Al liquidar, se marcarán las compras como saldadas y se registrará el reembolso en tu Disponible de Inicio.`
+            : `Las cuentas están al día ($0.00 MXN). Se marcarán las compras como saldadas.`;
+
+        Alert.alert(
+            '¿Liquidar saldo del ciclo?',
+            confirmMsg,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Sí, liquidar saldo',
+                    onPress: async () => {
+                        setIsSettling(true);
+                        try {
+                            const ids = unsettled.map((e) => e.id);
+                            await settleSharedExpenses(activeFundId, ids, settlementDetails);
+                            Alert.alert('¡Cuentas saldadas!', 'El balance de aportaciones ha quedado en $0.00 MXN y se actualizaron los movimientos en Inicio.');
+                        } catch (error) {
+                            console.error('Error al liquidar aportaciones:', error);
+                            Alert.alert('Error', 'No se pudo liquidar el saldo. Por favor intenta de nuevo.');
+                        } finally {
+                            setIsSettling(false);
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const handleDeleteExpense = (expense: SharedExpense) => {
+        if (!activeFundId) return;
+
+        Alert.alert(
+            '¿Eliminar aportación?',
+            `¿Estás seguro de que deseas eliminar "${expense.concept}" ($${expense.amount.toFixed(2)} MXN)? Esto recalculará el balance del ciclo y removerá el gasto personal vinculado en Inicio si existía.`,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Eliminar',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await deleteSharedExpense(activeFundId, expense.id, expense.personalTxId);
+                        } catch (error) {
+                            console.error('Error al eliminar aportación:', error);
+                            Alert.alert('Error', 'No se pudo eliminar la aportación.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const formatExpenseDate = (dateStr?: string) => {
+        if (!dateStr) return 'Hoy';
+        try {
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                const year = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10) - 1;
+                const day = parseInt(parts[2], 10);
+                const d = new Date(year, month, day);
+                return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+            }
+            return dateStr;
+        } catch {
+            return dateStr;
+        }
+    };
+
+    const getExpenseIcon = (concept: string): keyof typeof Ionicons.glyphMap => {
+        const lower = concept.toLowerCase();
+        if (
+            lower.includes('despensa') ||
+            lower.includes('super') ||
+            lower.includes('comida') ||
+            lower.includes('mercado') ||
+            lower.includes('chedraui') ||
+            lower.includes('walmart') ||
+            lower.includes('costco')
+        ) {
+            return 'cart-outline';
+        }
+        if (
+            lower.includes('restaurante') ||
+            lower.includes('cena') ||
+            lower.includes('tacos') ||
+            lower.includes('café') ||
+            lower.includes('cafe') ||
+            lower.includes('pizza')
+        ) {
+            return 'restaurant-outline';
+        }
+        if (
+            lower.includes('farmacia') ||
+            lower.includes('medicina') ||
+            lower.includes('doctor') ||
+            lower.includes('salud')
+        ) {
+            return 'medkit-outline';
+        }
+        if (
+            lower.includes('gas') ||
+            lower.includes('gasolina') ||
+            lower.includes('uber') ||
+            lower.includes('taxi')
+        ) {
+            return 'car-outline';
+        }
+        if (
+            lower.includes('hogar') ||
+            lower.includes('casa') ||
+            lower.includes('limpieza') ||
+            lower.includes('mueble')
+        ) {
+            return 'home-outline';
         }
         return 'receipt-outline';
     };
@@ -1009,14 +1444,24 @@ export default function CompartidosScreen() {
                                                                 /* CASO 1: NO ERES EL TITULAR (Pagas tu parte a la pareja) */
                                                                 <View style={styles.actionColumn}>
                                                                     {hasMyTransferred ? (
-                                                                        <View style={styles.transferredBadge}>
-                                                                            <Ionicons name="checkmark-circle" size={16} color={Theme.colors.income} />
-                                                                            <Text style={styles.transferredBadgeText}>Tu parte transferida</Text>
-                                                                        </View>
+                                                                        <TouchableOpacity
+                                                                            style={styles.transferredBadgeTouchable}
+                                                                            onPress={() => handleToggleTransferred(service, true)}
+                                                                            activeOpacity={0.7}
+                                                                        >
+                                                                            <View style={styles.transferredBadgeContent}>
+                                                                                <Ionicons name="checkmark-circle" size={16} color={Theme.colors.income} />
+                                                                                <Text style={styles.transferredBadgeText}>Tu parte transferida</Text>
+                                                                            </View>
+                                                                            <View style={styles.revertPill}>
+                                                                                <Ionicons name="refresh-outline" size={12} color={Theme.colors.textMuted} />
+                                                                                <Text style={styles.revertPillText}>Deshacer</Text>
+                                                                            </View>
+                                                                        </TouchableOpacity>
                                                                     ) : (
                                                                         <TouchableOpacity
                                                                             style={styles.transferActionBtn}
-                                                                            onPress={() => handleMarkTransferred(service)}
+                                                                            onPress={() => handleToggleTransferred(service, false)}
                                                                             activeOpacity={0.8}
                                                                         >
                                                                             <Ionicons name="paper-plane-outline" size={16} color={Theme.colors.background} />
@@ -1064,16 +1509,26 @@ export default function CompartidosScreen() {
 
                                                                     {/* Acción sobre el pago al proveedor */}
                                                                     {isPaidToProvider ? (
-                                                                        <View style={styles.paidProviderBadge}>
-                                                                            <Ionicons name="shield-checkmark" size={16} color={Theme.colors.income} />
-                                                                            <Text style={styles.paidProviderBadgeText}>
-                                                                                Servicio liquidado este mes
-                                                                            </Text>
-                                                                        </View>
+                                                                        <TouchableOpacity
+                                                                            style={styles.transferredBadgeTouchable}
+                                                                            onPress={() => handleTogglePaidToProvider(service, true)}
+                                                                            activeOpacity={0.7}
+                                                                        >
+                                                                            <View style={styles.transferredBadgeContent}>
+                                                                                <Ionicons name="shield-checkmark" size={16} color={Theme.colors.income} />
+                                                                                <Text style={styles.transferredBadgeText}>
+                                                                                    Servicio liquidado este mes
+                                                                                </Text>
+                                                                            </View>
+                                                                            <View style={styles.revertPill}>
+                                                                                <Ionicons name="refresh-outline" size={12} color={Theme.colors.textMuted} />
+                                                                                <Text style={styles.revertPillText}>Deshacer</Text>
+                                                                            </View>
+                                                                        </TouchableOpacity>
                                                                     ) : (
                                                                         <TouchableOpacity
                                                                             style={styles.payProviderActionBtn}
-                                                                            onPress={() => handleMarkPaidToProvider(service)}
+                                                                            onPress={() => handleTogglePaidToProvider(service, false)}
                                                                             activeOpacity={0.8}
                                                                         >
                                                                             <Ionicons name="receipt" size={16} color={Theme.colors.background} />
@@ -1092,28 +1547,346 @@ export default function CompartidosScreen() {
                                     )}
                                 </View>
 
-                                {/* Placeholder: Muro de Aportaciones (Fase 3) */}
-                                <View style={styles.cardPlaceholder}>
-                                    <View style={styles.cardPlaceholderHeader}>
-                                        <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 211, 153, 0.12)' }]}>
-                                            <Ionicons name="wallet-outline" size={20} color={Theme.colors.income} />
-                                        </View>
-                                        <View style={styles.cardPlaceholderTitleGroup}>
-                                            <View style={styles.titleBadgeInline}>
-                                                <Text style={styles.cardPlaceholderTitle}>Muro de Aportaciones</Text>
-                                                <View style={styles.phaseBadge}>
-                                                    <Text style={styles.phaseBadgeText}>Próximamente</Text>
-                                                </View>
+                                {/* ─────────────────────────────────────────────────────────────
+                                    SECCIÓN FASE 3: MURO DE APORTACIONES LIBRES Y BALANCE DEL CICLO
+                                   ───────────────────────────────────────────────────────────── */}
+                                <View style={styles.expensesSectionContainer}>
+                                    {/* Cabecera de la Sección */}
+                                    <View style={styles.expensesSectionHeaderRow}>
+                                        <View style={styles.expensesSectionHeaderLeft}>
+                                            <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 211, 153, 0.12)' }]}>
+                                                <Ionicons name="wallet-outline" size={20} color={Theme.colors.income} />
                                             </View>
-                                            <Text style={styles.cardPlaceholderSubtitle}>
-                                                Historial en vivo de aportaciones y balance proporcional de gastos.
+                                            <View>
+                                                <Text style={styles.expensesSectionTitle}>Muro de Aportaciones</Text>
+                                                <Text style={styles.expensesSectionSubtitle}>
+                                                    {balanceData.unsettled.length === 1
+                                                        ? '1 aportación activa'
+                                                        : `${balanceData.unsettled.length} aportaciones activas`}
+                                                </Text>
+                                            </View>
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.addExpenseButton}
+                                            onPress={handleOpenAddExpenseModal}
+                                            activeOpacity={0.8}
+                                        >
+                                            <Ionicons name="add" size={18} color={Theme.colors.background} />
+                                            <Text style={styles.addExpenseButtonText}> Aportar</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {/* TARJETA DINÁMICA DE BALANCE DEL CICLO */}
+                                    <View
+                                        style={[
+                                            styles.balanceCard,
+                                            balanceData.netBalance > 0.009 && styles.balanceCardPositive,
+                                            balanceData.netBalance < -0.009 && styles.balanceCardNegative,
+                                            Math.abs(balanceData.netBalance) <= 0.009 && styles.balanceCardNeutral,
+                                        ]}
+                                    >
+                                        <View style={styles.balanceHeaderRow}>
+                                            <View style={styles.balanceStatusBadge}>
+                                                <Ionicons
+                                                    name={
+                                                        balanceData.netBalance > 0.009
+                                                            ? 'arrow-down-circle'
+                                                            : balanceData.netBalance < -0.009
+                                                                ? 'arrow-up-circle'
+                                                                : 'checkmark-circle'
+                                                    }
+                                                    size={18}
+                                                    color={
+                                                        balanceData.netBalance > 0.009
+                                                            ? Theme.colors.income
+                                                            : balanceData.netBalance < -0.009
+                                                                ? '#F59E0B'
+                                                                : Theme.colors.borderFocus
+                                                    }
+                                                />
+                                                <Text
+                                                    style={[
+                                                        styles.balanceStatusText,
+                                                        balanceData.netBalance > 0.009 && { color: Theme.colors.income },
+                                                        balanceData.netBalance < -0.009 && { color: '#F59E0B' },
+                                                        Math.abs(balanceData.netBalance) <= 0.009 && { color: Theme.colors.borderFocus },
+                                                    ]}
+                                                >
+                                                    {balanceData.netBalance > 0.009
+                                                        ? 'Saldo a tu favor'
+                                                        : balanceData.netBalance < -0.009
+                                                            ? 'Saldo pendiente'
+                                                            : 'Cuentas al día'}
+                                                </Text>
+                                            </View>
+
+                                            <Text style={styles.balanceSpentSummary}>
+                                                Gasto acumulado: ${balanceData.totalSpent.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                                             </Text>
                                         </View>
+
+                                        {/* Monto Principal del Balance */}
+                                        <View style={styles.balanceAmountBlock}>
+                                            <Text
+                                                style={[
+                                                    styles.balanceMainAmount,
+                                                    balanceData.netBalance > 0.009 && { color: Theme.colors.income },
+                                                    balanceData.netBalance < -0.009 && { color: '#F59E0B' },
+                                                    Math.abs(balanceData.netBalance) <= 0.009 && { color: Theme.colors.textPrimary },
+                                                ]}
+                                            >
+                                                {balanceData.netBalance > 0.009
+                                                    ? `Te deben $${balanceData.netBalance.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`
+                                                    : balanceData.netBalance < -0.009
+                                                        ? `Debes $${Math.abs(balanceData.netBalance).toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN a ${partnerName}`
+                                                        : 'Cuentas al día'}
+                                            </Text>
+                                            <Text style={styles.balanceExplainerText}>
+                                                {balanceData.netBalance > 0.009
+                                                    ? `${partnerName} te debe transferir este monto para equilibrar las compras del hogar.`
+                                                    : balanceData.netBalance < -0.009
+                                                        ? `Has aportado menos que tu cuota asignada en los gastos compartidos.`
+                                                        : `Ambos han aportado equitativamente sus cuotas en este ciclo.`}
+                                            </Text>
+                                        </View>
+
+                                        {/* Fila Comparativa: Pagado por Ti vs Pagado por Pareja */}
+                                        <View style={styles.balanceComparisonRow}>
+                                            <View style={styles.balanceComparisonCol}>
+                                                <Text style={styles.balanceComparisonLabel}>Tú has pagado</Text>
+                                                <Text style={[styles.balanceComparisonVal, { color: Theme.colors.borderFocus }]}>
+                                                    ${balanceData.paidByMe.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                                <Text style={styles.balanceComparisonSub}>
+                                                    Tu cuota: ${balanceData.myShare.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                            </View>
+
+                                            <View style={styles.balanceComparisonDivider} />
+
+                                            <View style={styles.balanceComparisonCol}>
+                                                <Text style={styles.balanceComparisonLabel}>{partnerName} ha pagado</Text>
+                                                <Text style={[styles.balanceComparisonVal, { color: Theme.colors.income }]}>
+                                                    ${balanceData.paidByPartner.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                                <Text style={styles.balanceComparisonSub}>
+                                                    Cuota {partnerName}: ${balanceData.partnerShare.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                                </Text>
+                                            </View>
+                                        </View>
+
+                                        {/* Botón Liquidar Saldo */}
+                                        {balanceData.unsettled.length > 0 && (
+                                            <TouchableOpacity
+                                                style={styles.settleButton}
+                                                onPress={handleSettleExpenses}
+                                                activeOpacity={0.8}
+                                                disabled={isSettling}
+                                            >
+                                                {isSettling ? (
+                                                    <ActivityIndicator size="small" color={Theme.colors.background} />
+                                                ) : (
+                                                    <>
+                                                        <Ionicons name="checkmark-done" size={16} color={Theme.colors.background} />
+                                                        <Text style={styles.settleButtonText}>Liquidar saldo del ciclo</Text>
+                                                    </>
+                                                )}
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
-                                    <View style={styles.previewDivider} />
-                                    <Text style={styles.cardPlaceholderFooter}>
-                                        ⚖️ Registrarán los tickets de compras comunes para mantener el saldo equilibrado sin transferencias manuales.
-                                    </Text>
+
+                                    {/* Selector de Pestañas: Pendientes vs Historial */}
+                                    <View style={styles.filterTabsRow}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.filterTab,
+                                                expenseFilter === 'unsettled' && styles.filterTabActive,
+                                            ]}
+                                            onPress={() => setExpenseFilter('unsettled')}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.filterTabText,
+                                                    expenseFilter === 'unsettled' && styles.filterTabTextActive,
+                                                ]}
+                                            >
+                                                Pendientes ({balanceData.unsettled.length})
+                                            </Text>
+                                        </TouchableOpacity>
+
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.filterTab,
+                                                expenseFilter === 'all' && styles.filterTabActive,
+                                            ]}
+                                            onPress={() => setExpenseFilter('all')}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.filterTabText,
+                                                    expenseFilter === 'all' && styles.filterTabTextActive,
+                                                ]}
+                                            >
+                                                Historial ({balanceData.settled.length})
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {/* FEED DE APORTACIONES */}
+                                    {expensesLoading ? (
+                                        <View style={styles.expensesLoadingBox}>
+                                            <ActivityIndicator size="small" color={Theme.colors.income} />
+                                            <Text style={styles.expensesLoadingText}>Cargando aportaciones...</Text>
+                                        </View>
+                                    ) : (expenseFilter === 'unsettled' ? balanceData.unsettled : balanceData.settled).length === 0 ? (
+                                        <View style={styles.expensesEmptyCard}>
+                                            <View style={styles.expensesEmptyIconCircle}>
+                                                <Ionicons
+                                                    name={expenseFilter === 'unsettled' ? 'bag-check-outline' : 'archive-outline'}
+                                                    size={26}
+                                                    color={Theme.colors.textMuted}
+                                                />
+                                            </View>
+                                            <Text style={styles.expensesEmptyTitle}>
+                                                {expenseFilter === 'unsettled'
+                                                    ? 'Sin compras pendientes'
+                                                    : 'Sin compras en el historial'}
+                                            </Text>
+                                            <Text style={styles.expensesEmptySub}>
+                                                {expenseFilter === 'unsettled'
+                                                    ? 'Registren las compras del súper, comidas o gastos comunes para equilibrar el saldo automáticamente.'
+                                                    : 'Cuando liquiden el saldo pendiente, las compras saldadas se archivarán en esta sección.'}
+                                            </Text>
+                                            {expenseFilter === 'unsettled' && (
+                                                <TouchableOpacity
+                                                    style={styles.emptyAddExpenseBtn}
+                                                    onPress={handleOpenAddExpenseModal}
+                                                    activeOpacity={0.8}
+                                                >
+                                                    <Ionicons name="add-circle-outline" size={18} color={Theme.colors.income} />
+                                                    <Text style={styles.emptyAddExpenseBtnText}>Registrar primera compra</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    ) : (
+                                        <View style={styles.expensesListContainer}>
+                                            {(expenseFilter === 'unsettled' ? balanceData.unsettled : balanceData.settled).map((item) => {
+                                                const isPaidByMe = item.paidBy === currentUserUid;
+                                                const myPortion = item.split?.[currentUserUid] !== undefined
+                                                    ? Number(item.split[currentUserUid])
+                                                    : Math.round((Number(item.amount) / 2) * 100) / 100;
+                                                const partnerPortion = item.split?.[partnerUid] !== undefined
+                                                    ? Number(item.split[partnerUid])
+                                                    : Math.round((Number(item.amount) - myPortion) * 100) / 100;
+                                                const iconName = getExpenseIcon(item.concept);
+
+                                                return (
+                                                    <View key={item.id} style={styles.expenseItemCard}>
+                                                        {/* Fila superior: Icono, Concepto, Fecha, Borrar */}
+                                                        <View style={styles.expenseCardHeader}>
+                                                            <View style={styles.expenseIconCircle}>
+                                                                <Ionicons name={iconName} size={18} color={Theme.colors.income} />
+                                                            </View>
+                                                            <View style={styles.expenseTitleGroup}>
+                                                                <Text style={styles.expenseConceptText} numberOfLines={1}>
+                                                                    {item.concept}
+                                                                </Text>
+                                                                <View style={styles.expenseMetaRow}>
+                                                                    <View style={styles.expenseDateBadge}>
+                                                                        <Ionicons name="calendar-outline" size={11} color={Theme.colors.textMuted} />
+                                                                        <Text style={styles.expenseDateText}>
+                                                                            {formatExpenseDate(item.date)}
+                                                                        </Text>
+                                                                    </View>
+                                                                    <View
+                                                                        style={[
+                                                                            styles.payerBadge,
+                                                                            isPaidByMe ? styles.payerBadgeMe : styles.payerBadgePartner,
+                                                                        ]}
+                                                                    >
+                                                                        <Ionicons
+                                                                            name="wallet"
+                                                                            size={11}
+                                                                            color={isPaidByMe ? Theme.colors.borderFocus : Theme.colors.income}
+                                                                        />
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.payerBadgeText,
+                                                                                isPaidByMe ? { color: Theme.colors.borderFocus } : { color: Theme.colors.income },
+                                                                            ]}
+                                                                        >
+                                                                            Pagó: {isPaidByMe ? 'Tú' : partnerName}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+                                                            </View>
+
+                                                            {/* Botón Borrar si no está saldado */}
+                                                            {!item.settled && (
+                                                                <TouchableOpacity
+                                                                    style={styles.deleteExpenseBtn}
+                                                                    onPress={() => handleDeleteExpense(item)}
+                                                                    activeOpacity={0.7}
+                                                                    accessibilityLabel="Eliminar aportación"
+                                                                >
+                                                                    <Ionicons name="trash-outline" size={16} color={Theme.colors.textMuted} />
+                                                                </TouchableOpacity>
+                                                            )}
+                                                        </View>
+
+                                                        {/* Monto Total y Estado */}
+                                                        <View style={styles.expenseAmountRow}>
+                                                            <View>
+                                                                <Text style={styles.expenseAmountLabel}>Total de la compra</Text>
+                                                                <Text style={styles.expenseTotalAmount}>
+                                                                    ${item.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                                                                </Text>
+                                                            </View>
+                                                            <View
+                                                                style={[
+                                                                    styles.settledStatusBadge,
+                                                                    item.settled ? styles.settledBadgeDone : styles.settledBadgePending,
+                                                                ]}
+                                                            >
+                                                                <Ionicons
+                                                                    name={item.settled ? 'checkmark-circle' : 'time-outline'}
+                                                                    size={12}
+                                                                    color={item.settled ? Theme.colors.income : '#F59E0B'}
+                                                                />
+                                                                <Text
+                                                                    style={[
+                                                                        styles.settledStatusText,
+                                                                        item.settled ? { color: Theme.colors.income } : { color: '#F59E0B' },
+                                                                    ]}
+                                                                >
+                                                                    {item.settled ? 'Saldado' : 'Pendiente'}
+                                                                </Text>
+                                                            </View>
+                                                        </View>
+
+                                                        {/* Desglose de Porciones */}
+                                                        <View style={styles.expenseSplitRow}>
+                                                            <View style={styles.expenseSplitPill}>
+                                                                <Text style={styles.expenseSplitPillLabel}>Tú:</Text>
+                                                                <Text style={[styles.expenseSplitPillVal, { color: Theme.colors.borderFocus }]}>
+                                                                    ${myPortion.toFixed(2)}
+                                                                </Text>
+                                                            </View>
+                                                            <View style={styles.expenseSplitPill}>
+                                                                <Text style={styles.expenseSplitPillLabel}>{partnerName}:</Text>
+                                                                <Text style={[styles.expenseSplitPillVal, { color: Theme.colors.income }]}>
+                                                                    ${partnerPortion.toFixed(2)}
+                                                                </Text>
+                                                            </View>
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })}
+                                        </View>
+                                    )}
                                 </View>
 
                                 {/* Botón para Abandonar Espacio */}
@@ -1541,7 +2314,7 @@ export default function CompartidosScreen() {
                                 style={[
                                     styles.modalSubmitButton,
                                     (!serviceConcept.trim() || !(parseFloat(serviceAmount) > 0) || isSubmittingService) &&
-                                        styles.modalSubmitButtonDisabled,
+                                    styles.modalSubmitButtonDisabled,
                                 ]}
                                 onPress={handleAddService}
                                 activeOpacity={0.8}
@@ -1553,6 +2326,268 @@ export default function CompartidosScreen() {
                                     <>
                                         <Ionicons name="checkmark" size={18} color={Theme.colors.background} />
                                         <Text style={styles.modalSubmitButtonText}>Guardar Servicio del Hogar</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            {/* MODAL PARA AGREGAR APORTACIÓN LIBRE (FASE 3) */}
+            <Modal
+                visible={expenseModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setExpenseModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
+                    <View style={styles.modalCard}>
+                        <View style={styles.modalHeader}>
+                            <View style={styles.modalHeaderTitleGroup}>
+                                <Text style={styles.modalTitle}>Registrar Compra o Aportación</Text>
+                                <Text style={styles.modalSubtitle}>Gasto libre para el balance del ciclo</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setExpenseModalVisible(false)}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="close" size={20} color={Theme.colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                            contentContainerStyle={styles.modalScrollContent}
+                        >
+                            {/* 1. Concepto */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>Concepto o Descripción</Text>
+                                <TextInput
+                                    style={styles.modalTextInput}
+                                    placeholder="Ej. Despensa Chedraui, Gasolina, Farmacia..."
+                                    placeholderTextColor={Theme.colors.textMuted}
+                                    value={expenseConcept}
+                                    onChangeText={setExpenseConcept}
+                                    maxLength={50}
+                                />
+                            </View>
+
+                            {/* 2. Monto Total */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>Monto Total de la Compra</Text>
+                                <View style={styles.amountInputContainer}>
+                                    <Text style={styles.currencySymbol}>$</Text>
+                                    <TextInput
+                                        style={styles.amountInput}
+                                        placeholder="0.00"
+                                        placeholderTextColor={Theme.colors.textMuted}
+                                        keyboardType="numeric"
+                                        value={expenseAmount}
+                                        onChangeText={handleExpenseAmountChange}
+                                        maxLength={10}
+                                    />
+                                    <Text style={styles.currencyCode}>MXN</Text>
+                                </View>
+                            </View>
+
+                            {/* 3. Selector de Quién Pagó */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>¿Quién pagó esta compra?</Text>
+                                <View style={styles.holderSelectorRow}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.holderChip,
+                                            expensePaidBy === currentUserUid && styles.holderChipActive,
+                                        ]}
+                                        onPress={() => setExpensePaidBy(currentUserUid)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons
+                                            name="person"
+                                            size={16}
+                                            color={expensePaidBy === currentUserUid ? Theme.colors.borderFocus : Theme.colors.textMuted}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.holderChipText,
+                                                expensePaidBy === currentUserUid && styles.holderChipTextActive,
+                                            ]}
+                                        >
+                                            Pagué yo ({myName})
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.holderChip,
+                                            expensePaidBy === partnerUid && styles.holderChipActive,
+                                        ]}
+                                        onPress={() => setExpensePaidBy(partnerUid)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons
+                                            name="person"
+                                            size={16}
+                                            color={expensePaidBy === partnerUid ? Theme.colors.income : Theme.colors.textMuted}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.holderChipText,
+                                                expensePaidBy === partnerUid && styles.holderChipTextActive,
+                                            ]}
+                                        >
+                                            Pagó {partnerName}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            {/* 4. División de la Compra */}
+                            <View style={styles.modalInputBlock}>
+                                <Text style={styles.modalInputLabel}>División de la Compra</Text>
+                                <View style={styles.splitModeRow}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.splitModeChip,
+                                            expenseSplitMode === '50-50' && styles.splitModeChipActive,
+                                        ]}
+                                        onPress={() => {
+                                            setExpenseSplitMode('50-50');
+                                            const num = parseFloat(expenseAmount) || 0;
+                                            if (num > 0) {
+                                                const half = Math.round((num / 2) * 100) / 100;
+                                                setExpenseSplitMe(half.toFixed(2));
+                                                setExpenseSplitPartner((num - half).toFixed(2));
+                                            }
+                                        }}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.splitModeChipText,
+                                                expenseSplitMode === '50-50' && styles.splitModeChipTextActive,
+                                            ]}
+                                        >
+                                            50% / 50% (Equitativo)
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.splitModeChip,
+                                            expenseSplitMode === 'custom' && styles.splitModeChipActive,
+                                        ]}
+                                        onPress={() => setExpenseSplitMode('custom')}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.splitModeChipText,
+                                                expenseSplitMode === 'custom' && styles.splitModeChipTextActive,
+                                            ]}
+                                        >
+                                            Personalizado
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {expenseSplitMode === '50-50' ? (
+                                    <View style={styles.splitPreviewRow}>
+                                        <View style={styles.splitPreviewPill}>
+                                            <Text style={styles.splitPreviewName}>Tú:</Text>
+                                            <Text style={styles.splitPreviewValue}>
+                                                ${(parseFloat(expenseSplitMe) || (parseFloat(expenseAmount) || 0) / 2).toFixed(2)} MXN
+                                            </Text>
+                                        </View>
+                                        <View style={styles.splitPreviewPill}>
+                                            <Text style={styles.splitPreviewName}>{partnerName}:</Text>
+                                            <Text style={styles.splitPreviewValue}>
+                                                ${(parseFloat(expenseSplitPartner) || (parseFloat(expenseAmount) || 0) / 2).toFixed(2)} MXN
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <View style={styles.customSplitInputsRow}>
+                                        <View style={styles.customSplitInputCol}>
+                                            <Text style={styles.customSplitLabel}>Tu cuota</Text>
+                                            <View style={styles.amountInputContainerSmall}>
+                                                <Text style={styles.currencySymbolSmall}>$</Text>
+                                                <TextInput
+                                                    style={styles.amountInputSmall}
+                                                    placeholder="0.00"
+                                                    placeholderTextColor={Theme.colors.textMuted}
+                                                    keyboardType="numeric"
+                                                    value={expenseSplitMe}
+                                                    onChangeText={handleExpenseSplitMeChange}
+                                                    maxLength={10}
+                                                />
+                                            </View>
+                                        </View>
+
+                                        <View style={styles.customSplitInputCol}>
+                                            <Text style={styles.customSplitLabel}>Cuota {partnerName}</Text>
+                                            <View style={styles.amountInputContainerSmall}>
+                                                <Text style={styles.currencySymbolSmall}>$</Text>
+                                                <TextInput
+                                                    style={styles.amountInputSmall}
+                                                    placeholder="0.00"
+                                                    placeholderTextColor={Theme.colors.textMuted}
+                                                    keyboardType="numeric"
+                                                    value={expenseSplitPartner}
+                                                    onChangeText={handleExpenseSplitPartnerChange}
+                                                    maxLength={10}
+                                                />
+                                            </View>
+                                        </View>
+                                    </View>
+                                )}
+                            </View>
+
+                            {/* 5. Opción compacta: Descontar ticket completo vs solo cuota (si pagó el usuario) */}
+                            {expensePaidBy === currentUserUid && (
+                                <View style={styles.switchRowContainer}>
+                                    <View style={styles.switchLabelGroup}>
+                                        <Text style={styles.switchTitle}>Pagué el total de mi cuenta bancaria</Text>
+                                        <Text style={styles.switchSubtitle}>
+                                            {fullTicketDebit
+                                                ? `Se descontará el ticket completo ($${(parseFloat(expenseAmount) || 0).toFixed(2)}) de tu Disponible personal.`
+                                                : `Solo descontará tu cuota proporcional (${expenseSplitMode === '50-50' ? `$${((parseFloat(expenseAmount) || 0) / 2).toFixed(2)}` : `$${(parseFloat(expenseSplitMe) || 0).toFixed(2)}`}) en Inicio.`}
+                                        </Text>
+                                    </View>
+                                    <Switch
+                                        value={fullTicketDebit}
+                                        onValueChange={setFullTicketDebit}
+                                        trackColor={{ false: 'rgba(255, 255, 255, 0.15)', true: Theme.colors.borderFocus }}
+                                        thumbColor={Platform.OS === 'android' ? (fullTicketDebit ? Theme.colors.background : Theme.colors.textMuted) : undefined}
+                                        ios_backgroundColor="rgba(255, 255, 255, 0.15)"
+                                    />
+                                </View>
+                            )}
+
+                            {/* Botón Guardar */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalSubmitButton,
+                                    { backgroundColor: Theme.colors.income },
+                                    (!expenseConcept.trim() || !(parseFloat(expenseAmount) > 0) || isSubmittingExpense) &&
+                                    styles.modalSubmitButtonDisabled,
+                                ]}
+                                onPress={handleAddExpense}
+                                activeOpacity={0.8}
+                                disabled={!expenseConcept.trim() || !(parseFloat(expenseAmount) > 0) || isSubmittingExpense}
+                            >
+                                {isSubmittingExpense ? (
+                                    <ActivityIndicator size="small" color={Theme.colors.background} />
+                                ) : (
+                                    <>
+                                        <Ionicons name="checkmark" size={18} color={Theme.colors.background} />
+                                        <Text style={styles.modalSubmitButtonText}>Guardar Aportación</Text>
                                     </>
                                 )}
                             </TouchableOpacity>
@@ -2562,5 +3597,437 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: Theme.colors.background,
+    },
+    // ─────────────────────────────────────────────────────────────
+    // ESTILOS FASE 3: MURO DE APORTACIONES Y BALANCE
+    // ─────────────────────────────────────────────────────────────
+    expensesSectionContainer: {
+        gap: 12,
+        marginTop: 8,
+    },
+    expensesSectionHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    expensesSectionHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    expensesSectionTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    expensesSectionSubtitle: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+    },
+    addExpenseButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: Theme.colors.income,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: Theme.radius.full,
+    },
+    addExpenseButtonText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.background,
+    },
+    // Tarjeta Dinámica de Balance
+    balanceCard: {
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderRadius: Theme.radius.lg,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        padding: 16,
+        gap: 14,
+    },
+    balanceCardPositive: {
+        borderColor: 'rgba(52, 211, 153, 0.4)',
+        backgroundColor: 'rgba(52, 211, 153, 0.05)',
+    },
+    balanceCardNegative: {
+        borderColor: 'rgba(245, 158, 11, 0.4)',
+        backgroundColor: 'rgba(245, 158, 11, 0.05)',
+    },
+    balanceCardNeutral: {
+        borderColor: 'rgba(56, 189, 248, 0.35)',
+        backgroundColor: 'rgba(56, 189, 248, 0.04)',
+    },
+    balanceHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    balanceStatusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    balanceStatusText: {
+        fontSize: 12,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    balanceSpentSummary: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+        fontWeight: '500',
+    },
+    balanceAmountBlock: {
+        gap: 4,
+    },
+    balanceMainAmount: {
+        fontSize: 22,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+    },
+    balanceExplainerText: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+        lineHeight: 17,
+    },
+    balanceComparisonRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        borderRadius: Theme.radius.md,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+    },
+    balanceComparisonCol: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    balanceComparisonLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: Theme.colors.textMuted,
+        textTransform: 'uppercase',
+    },
+    balanceComparisonVal: {
+        fontSize: 14,
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    balanceComparisonSub: {
+        fontSize: 10,
+        color: Theme.colors.textMuted,
+        marginTop: 1,
+    },
+    balanceComparisonDivider: {
+        width: 1,
+        height: 28,
+        backgroundColor: Theme.colors.borderSubtle,
+    },
+    settleButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        backgroundColor: Theme.colors.income,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: Theme.radius.md,
+        marginTop: 2,
+    },
+    settleButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Theme.colors.background,
+    },
+    // Selector de Pestañas
+    filterTabsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        padding: 4,
+        borderRadius: Theme.radius.md,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+    },
+    filterTab: {
+        flex: 1,
+        paddingVertical: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: Theme.radius.sm,
+    },
+    filterTabActive: {
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    filterTabText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Theme.colors.textMuted,
+    },
+    filterTabTextActive: {
+        color: Theme.colors.textPrimary,
+        fontWeight: '700',
+    },
+    // Feed y Carga
+    expensesLoadingBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        padding: 20,
+    },
+    expensesLoadingText: {
+        fontSize: 12,
+        color: Theme.colors.textMuted,
+    },
+    expensesEmptyCard: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        borderRadius: Theme.radius.lg,
+        gap: 10,
+    },
+    expensesEmptyIconCircle: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    expensesEmptyTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    expensesEmptySub: {
+        fontSize: 12,
+        color: Theme.colors.textSecondary,
+        textAlign: 'center',
+        lineHeight: 18,
+        maxWidth: 290,
+    },
+    emptyAddExpenseBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: Theme.radius.full,
+        backgroundColor: 'rgba(52, 211, 153, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(52, 211, 153, 0.3)',
+        marginTop: 4,
+    },
+    emptyAddExpenseBtnText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Theme.colors.income,
+    },
+    // Lista de Aportaciones
+    expensesListContainer: {
+        gap: 10,
+    },
+    expenseItemCard: {
+        backgroundColor: Theme.colors.cardSurfaceSubtle,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        borderRadius: Theme.radius.lg,
+        padding: 14,
+        gap: 10,
+    },
+    expenseCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    expenseIconCircle: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: 'rgba(52, 211, 153, 0.12)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    expenseTitleGroup: {
+        flex: 1,
+        gap: 3,
+    },
+    expenseConceptText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    expenseMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        flexWrap: 'wrap',
+    },
+    expenseDateBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: Theme.radius.xs,
+    },
+    expenseDateText: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+    },
+    payerBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: Theme.radius.xs,
+        borderWidth: 1,
+    },
+    payerBadgeMe: {
+        backgroundColor: 'rgba(56, 189, 248, 0.08)',
+        borderColor: 'rgba(56, 189, 248, 0.25)',
+    },
+    payerBadgePartner: {
+        backgroundColor: 'rgba(52, 211, 153, 0.08)',
+        borderColor: 'rgba(52, 211, 153, 0.25)',
+    },
+    payerBadgeText: {
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    deleteExpenseBtn: {
+        padding: 4,
+    },
+    expenseAmountRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+        borderRadius: Theme.radius.sm,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+    },
+    expenseAmountLabel: {
+        fontSize: 10,
+        color: Theme.colors.textMuted,
+        textTransform: 'uppercase',
+    },
+    expenseTotalAmount: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: Theme.colors.textPrimary,
+    },
+    settledStatusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: Theme.radius.sm,
+        borderWidth: 1,
+    },
+    settledBadgeDone: {
+        backgroundColor: 'rgba(52, 211, 153, 0.1)',
+        borderColor: 'rgba(52, 211, 153, 0.3)',
+    },
+    settledBadgePending: {
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+        borderColor: 'rgba(245, 158, 11, 0.3)',
+    },
+    settledStatusText: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    expenseSplitRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    expenseSplitPill: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        borderRadius: Theme.radius.sm,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+    },
+    expenseSplitPillLabel: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+    },
+    expenseSplitPillVal: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    transferredBadgeTouchable: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(52, 211, 153, 0.12)',
+        borderWidth: 1,
+        borderColor: 'rgba(52, 211, 153, 0.3)',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: Theme.radius.md,
+    },
+    transferredBadgeContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    revertPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: Theme.radius.full,
+    },
+    revertPillText: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: Theme.colors.textMuted,
+    },
+    switchRowContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        borderRadius: Theme.radius.md,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderWidth: 1,
+        borderColor: Theme.colors.borderSubtle,
+        gap: 12,
+    },
+    switchLabelGroup: {
+        flex: 1,
+        gap: 3,
+    },
+    switchTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: Theme.colors.textPrimary,
+    },
+    switchSubtitle: {
+        fontSize: 11,
+        color: Theme.colors.textMuted,
+        lineHeight: 15,
     },
 });

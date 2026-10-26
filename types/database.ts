@@ -48,9 +48,25 @@ export interface SharedService {
     status: {
         transferredBy: string[];     // UIDs de quienes ya transfirieron su cuota a la contraparte
         paidToProvider: boolean;     // true si el titular ya liquidó el recibo completo al proveedor
+        isPaidByOwner?: boolean;     // alias compatible con paidToProvider
         lastPaidMonth?: string;      // Formato 'YYYY-MM' para control de ciclo
     };
     createdAt: any;
+}
+
+export interface SharedExpense {
+    id: string;
+    concept: string;
+    amount: number;
+    paidBy: string;
+    paidByName: string;
+    date: string;
+    split: {
+        [uid: string]: number;
+    };
+    settled: boolean;
+    personalTxId?: string | null;
+    createdAt: Timestamp | any;
 }
 
 export interface Transaction {
